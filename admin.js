@@ -9,7 +9,7 @@ const escapeHtml = (s)=>String(s??"")
   .replaceAll('"',"&quot;")
   .replaceAll("'","&#039;");
 
-function show(id){ const el=$(id); if(!el) return; el.style.display = (el.classList && el.classList.contains("modal")) ? "flex" : ""; }
+function show(id){ const el=$(id); if(!el) return; el.style.display = el.classList.contains("modal") ? "flex" : ""; }
 function hide(id){ const el=$(id); if(el) el.style.display="none"; }
 
 function setActiveTab(tab){
@@ -109,7 +109,7 @@ async function loadClientes(){
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
 
-    wrap.innerHTML = items.length ? items.map(c=>{
+    wrap.innerHTML = visible.length ? items.map(c=>{
       const name = c.fullName || "(sin nombre)";
       const pts = Number(c.points||0);
       const spent = Number(c.totalSpent||0);
@@ -321,8 +321,9 @@ async function loadProducts(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
+    const visible = items.filter(p=>p.active!==false);
 
-    wrap.innerHTML = items.length ? items.map(p=>{
+    wrap.innerHTML = visible.length ? visible.map(p=>{
       const meta = [p.brand, p.category, p.sub].filter(Boolean).join(" • ");
       const size = p.sizeLabel && p.sizeValue ? `${p.sizeLabel}: ${p.sizeValue}` : (p.sizeValue?`${p.sizeValue}`:"");
       const cm = p.cm ? ` • cm: ${escapeHtml(p.cm)}` : "";
@@ -370,7 +371,7 @@ async function loadProducts(){
         const id = btn.getAttribute("data-del");
         if(!confirm("¿Eliminar este producto?")) return;
         try{
-          await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
+          await fb.deleteDoc(fb.doc(db,"products",id));
           await loadProducts();
         }catch(e){
           console.warn(e);
