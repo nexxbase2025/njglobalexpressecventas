@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Admin • NJ Global Express EC</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <img class="logo" src="logo.png" alt="logo" />
+    <div class="brand">
+      <div class="name">Admin</div>
+      <div class="sub">Gestión de productos y pedidos</div>
+    </div>
+    <div class="actions">
+      <a class="btn" href="index.html">← Volver</a>
+      <button class="btn" id="logoutFirebase" style="display:none;">Salir</button>
+    </div>
+  </header>
+
+  <main class="container" style="max-width:920px;">
+    <section id="adminArea" style="display:none;">
+      <div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+        <button class="btn" id="tabClientes">Clientes</button>
+        <button class="btn" id="tabPedidos">Pedidos</button>
+        <button class="btn aqua" id="tabAgregar">Agregar</button>
+      </div>
+
+      <section class="panel" id="panelClientes" style="display:none;">
+        <div class="row">
+          <div style="font-weight:980; font-size:16px;">Clientes</div>
+          <button class="btn" id="btnRefreshClientes">Actualizar</button>
+        </div>
+        <div id="adminClientes" class="cartlist" style="margin-top:10px;"></div>
+      </section>
+
+      <section class="panel" id="panelPedidos" style="display:none;">
+        <div class="row">
+          <div style="font-weight:980; font-size:16px;">Pedidos</div>
+          <button class="btn" id="btnRefreshOrders">Actualizar</button>
+        </div>
+        <div id="adminOrders" class="cartlist" style="margin-top:10px;"></div>
+      </section>
+
+      <section class="panel" id="panelAgregar" style="display:none;">
+        <div class="row">
+          <div style="font-weight:980; font-size:16px;">Productos</div>
+          <button class="btn aqua" id="btnAddProduct">+ Agregar</button>
+        </div>
+        <div id="adminProducts" class="cartlist" style="margin-top:10px;"></div>
+      </section>
+    </section>
+  </main>
+
+  <script type="module" src="admin.js"></script>
+
+  <div class="modal" id="firebaseLogin" style="display:none;">
+    <div class="panel" style="max-width:420px;">
+      <div style="font-weight:980; font-size:16px;">Entrar Admin</div>
+      <div class="small" style="margin-top:6px;">Inicia sesión para administrar productos y ver ventas.</div>
+
+      <div style="margin-top:12px; display:grid; gap:10px;">
+        <input class="input" id="fbEmail" placeholder="Correo" />
+        <input class="input" id="fbPass" type="password" placeholder="Contraseña" />
+        <button class="btn primary" id="loginFirebase">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="productModal" style="display:none;">
+    <div class="panel" style="max-width:520px;">
+      <div class="row">
+        <div style="font-weight:980; font-size:16px;">Producto</div>
+        <button class="btn" id="pmClose">✕</button>
+      </div>
+      <input type="hidden" id="pmId" />
+      <input type="hidden" id="pmImageUrl" />
+
+      <div style="margin-top:10px; display:grid; gap:10px;">
+        <input class="input" id="pmTitle" placeholder="Título (Ej: Nike Air)" />
+        <div class="row" style="gap:10px;">
+          <input class="input" id="pmBrand" placeholder="Marca (Ej: Nike)" />
+          <select class="input" id="pmCategory">
+            <option>Ropa</option>
+            <option>Calzado</option>
+            <option>Bisutería</option>
+            <option>Electrónica</option>
+          </select>
+        </div>
+        <input class="input" id="pmSub" placeholder="Tipo (Ej: Caballero / Dama / Niños / Todos)" />
+        <div class="row" style="gap:10px;">
+          <input class="input" id="pmPrice" type="number" step="0.01" placeholder="Precio" />
+          <input class="input" id="pmStock" type="number" step="1" placeholder="Stock" />
+        </div>
+        <div class="row" style="gap:10px;">
+          <input class="input" id="pmSizeLabel" placeholder="Etiqueta (Ej: Talla / Contenido)" />
+          <input class="input" id="pmSizeValue" placeholder="Valor (Ej: 41-42 / 250 ml)" />
+        </div>
+        <input class="input" id="pmCm" placeholder="cm (solo calzado, opcional)" />
+        <input class="input" id="pmImage" type="file" accept="image/*" />
+        <button class="btn aqua" id="pmSave">Guardar producto</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
