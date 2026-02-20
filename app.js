@@ -145,15 +145,18 @@ $("fbBtn").addEventListener("click",()=>window.open(CONFIG.socials.facebook,"_bl
    - En el tope (scroll arriba), jala hacia abajo 3 veces (pull).
 */
 (function setupHiddenAdmin(){
-  const el = $("subtitle");
-  if(el){
+  // A veces el usuario toca el bloque completo (no solo el texto).
+  // Soportamos tap 4x en: "Compras Ecuador" (subtitle) y en el bloque .brand.
+  const targets = [$("subtitle"), document.querySelector(".brand")].filter(Boolean);
+  if(targets.length){
     let taps=0; let tmr=null;
-    el.addEventListener("click",(e)=>{
+    const onTap = ()=>{
       taps += 1;
       if(tmr) clearTimeout(tmr);
       tmr = setTimeout(()=>{ taps=0; }, 900);
       if(taps>=4){ taps=0; location.href="admin.html"; }
-    });
+    };
+    targets.forEach(el=>el.addEventListener("click", onTap));
   }
 
   let pulls=0; let pullTimer=null;
