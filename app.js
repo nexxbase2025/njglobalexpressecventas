@@ -454,24 +454,43 @@ function renderCart(){
 }
 
 $("btnPlaceOrder").addEventListener("click", async ()=>{
+  // Abrimos la ventana de WhatsApp *antes* de los awaits para evitar bloqueos en móviles.
+  const waPopup = window.open("about:blank","_blank","noopener,noreferrer");
+  if(!waPopup){
+    alert("Tu navegador bloqueó la ventana de WhatsApp. Activa los pop-ups y vuelve a intentar.");
+    return;
+  }
+
   const shipping=getShipping();
-  if(!shipping){ openModal("modalReg"); return; }
+  if(!shipping){ waPopup.close(); openModal("modalReg"); return; }
+
   const cart=getCart();
   const enriched=enrichCart(cart);
-  if(!enriched.length){ alert("Carrito vacío."); return; }
-  for(const {ci,p} of enriched){ if((p.stock||0) < (ci.qty||0)){ alert(`Stock insuficiente para: ${p.title}`); return; } }
+  if(!enriched.length){ waPopup.close(); alert("Carrito vacío."); return; }
+
+  for(const {ci,p} of enriched){
+    if((p.stock||0) < (ci.qty||0)){ waPopup.close(); alert(`Stock insuficiente para: ${p.title}`); return; }
+  }
+
+  // Requerir comprobante para poder crear el pedido
+  const file=$("proof").files?.[0]||null;
+  if(!file){
+    waPopup.close();
+    alert("Adjunta el comprobante de pago antes de realizar el pedido.");
+    return;
+  }
+
   const subtotal=enriched.reduce((s,x)=>s+(Number(x.p.price||0)*x.ci.qty),0);
   const ship=Math.max(0,Number($("shippingCost").value||0));
   const totalFinal=ship>0?subtotal+ship:null;
   const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(totalFinal??subtotal);
 
-  const file=$("proof").files?.[0]||null;
   const orderId = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
   if(!orderId){
-    // Mostrar el error real, no "internet".
     const msg = LAST_ORDER_ERROR
       ? `No se pudo crear el pedido. (${LAST_ORDER_ERROR})`
       : "No se pudo crear el pedido.";
+    waPopup.close();
     alert(msg);
     return;
   }
@@ -487,26 +506,29 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     totalFinal,
   };
 
+  // Guardar en silencio y luego abrir WhatsApp Business con el pedido
+  try{
+    const e164=toWhatsAppE164(CONFIG.whatsapp || "0983706294");
+    waPopup.location.href = `https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`;
+    try{ waPopup.focus(); }catch{}
+  }catch(e){
+    console.warn(e);
+    try{ waPopup.close(); }catch{}
+    alert("Se creó el pedido, pero no se pudo abrir WhatsApp.");
+  }
+
   // Limpiar UI
   $("proof").value = "";
   bindProofInput();
   setCart([]); updateCartBadge(); renderCart();
 
-  // Mostrar confirmación en pantalla (y abrir WhatsApp SOLO cuando el usuario toque el botón)
-  LAST_ORDER_FOR_WHATSAPP = order;
+  // Mostrar confirmación (opcional)
   const resBox = $("orderResult");
   const resTxt = $("orderResultText");
-  const btnW = $("btnSendWhats");
-  const btnN = $("btnNewOrder");
-  if(resTxt) resTxt.textContent = `ID: ${order.id} • Total: ${formatMoney(due)}${file? " • Comprobante adjunto ✅" : " • Falta comprobante ⚠️"}`;
+  if(resTxt) resTxt.textContent = `ID: ${order.id} • Total: ${formatMoney(due)} • Comprobante adjunto ✅`;
   if(resBox) resBox.style.display = "block";
-  if(btnW){
-    btnW.onclick = ()=>{ try{ openWhatsApp(LAST_ORDER_FOR_WHATSAPP); }catch(e){ console.warn(e); alert("No se pudo abrir WhatsApp."); } };
-  }
-  if(btnN){
-    btnN.onclick = ()=>{ if(resBox) resBox.style.display="none"; alert("Listo ✅ Puedes seguir comprando."); };
-  }
 });
+
 
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m])); }
 
