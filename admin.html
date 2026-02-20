@@ -78,26 +78,31 @@
       <input type="hidden" id="pmImageUrl" />
 
       <div style="margin-top:10px; display:grid; gap:10px;">
-        <input class="input" id="pmTitle" placeholder="Título (Ej: Nike Air)" />
+        <input class="input" id="pmTitle" placeholder="Producto (Ej: Zapatos deportivos / Micrófono)" />
         <div class="row" style="gap:10px;">
           <input class="input" id="pmBrand" placeholder="Marca (Ej: Nike)" />
           <select class="input" id="pmCategory">
-            <option>Ropa</option>
-            <option>Calzado</option>
-            <option>Bisutería</option>
-            <option>Electrónica</option>
+            <option value="calzado">Calzado</option>
+            <option value="ropa">Ropa</option>
+            <option value="perfumeria">Perfumería</option>
+            <option value="electronica">Electrónica</option>
           </select>
         </div>
-        <input class="input" id="pmSub" placeholder="Tipo (Ej: Caballero / Dama / Niños / Todos)" />
+        <select class="input" id="pmSub">
+          <option value="Caballero">Caballero</option>
+          <option value="Dama">Dama</option>
+          <option value="Niños">Niños</option>
+          <option value="Varios">Varios</option>
+        </select>
         <div class="row" style="gap:10px;">
           <input class="input" id="pmPrice" type="number" step="0.01" placeholder="Precio" />
           <input class="input" id="pmStock" type="number" step="1" placeholder="Stock" />
         </div>
         <div class="row" style="gap:10px;">
-          <input class="input" id="pmSizeLabel" placeholder="Etiqueta (Ej: Talla / Contenido)" />
-          <input class="input" id="pmSizeValue" placeholder="Valor (Ej: 41-42 / 250 ml)" />
+          <input type="hidden" id="pmSizeLabel" value="Talla" />
+          <input class="input" id="pmSizeValue" placeholder="Talla / Contenido (ej: 42 / L / 250 ml)" />
         </div>
-        <input class="input" id="pmCm" placeholder="cm (solo calzado, opcional)" />
+        <input class="input" id="pmCm" placeholder="Centímetros (solo calzado, opcional)" />
         <input class="input" id="pmImage" type="file" accept="image/*" />
         <button class="btn aqua" id="pmSave">Guardar producto</button>
       </div>

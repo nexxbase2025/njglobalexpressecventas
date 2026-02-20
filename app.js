@@ -199,7 +199,7 @@ function buildSubPills(){
 function filterProducts(all){
   return all.filter(p=>{
     if(activeCat!=="all" && (p.category||"")!==activeCat) return false;
-    if(activeSub && (p.subcategory||"")!==activeSub) return false;
+    if(activeSub && ((p.subcategory||p.sub||"")!==activeSub)) return false;
     return true;
   });
 }
@@ -226,7 +226,7 @@ function getVariantMeta(p){
     const cmPart=cms.length?` • cm: <b>${minmax(cms)}</b>`:"";
     return `${sPart}${cmPart}`;
   }
-  return p.size?`${escapeHtml(p.measureLabel||"Talla")}: <b>${escapeHtml(p.size)}</b>`:"Varias";
+  return (p.size||p.sizeValue)?`${escapeHtml(p.measureLabel||p.sizeLabel||"Talla")}: <b>${escapeHtml(p.size||p.sizeValue)}</b>${p.cm?` • cm: <b>${escapeHtml(p.cm)}</b>`:""}`:"Varias";
 }
 function cardHTML(p){
   const soldOut=(p.stock||0)<=0;
@@ -239,7 +239,7 @@ function cardHTML(p){
     </div>
     <div class="body">
       <div class="title">${escapeHtml(p.title)}</div>
-      <div class="meta"><b>${escapeHtml(p.brand||"")}</b>${p.category?` • ${escapeHtml(labelCat(p.category))}`:""}${p.subcategory?` • ${escapeHtml(p.subcategory)}`:""}<br/>${getVariantMeta(p)}</div>
+      <div class="meta"><b>${escapeHtml(p.brand||"")}</b>${p.category?` • ${escapeHtml(labelCat(p.category))}`:""}${(p.subcategory||p.sub)?` • ${escapeHtml(p.subcategory||p.sub)}`:""}<br/>${getVariantMeta(p)}</div>
       <button class="btn primary add" data-add="${p.id}" ${soldOut?"disabled":""}>${soldOut?"No disponible":"Agregar"}</button>
     </div>
   </article>`;
@@ -425,8 +425,12 @@ function buildWhatsAppMessage(order){
 }
 function openWhatsApp(order){
   const e164=toWhatsAppE164(CONFIG.whatsapp);
-  window.open(`https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`,"_blank","noopener,noreferrer");
+  const url = `https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`;
+  // iPhone suele bloquear window.open después de un await, por eso dejamos fallback
+  const w = window.open(url, "_blank", "noopener,noreferrer");
+  if(!w) window.location.href = url;
 }
+
 
 function renderCart(){
   const list=$("cartList");
@@ -468,11 +472,7 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
   const file=$("proof").files?.[0]||null;
   const orderId = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
   if(!orderId){
-    // Mostrar el error real, no "internet".
-    const msg = LAST_ORDER_ERROR
-      ? `No se pudo crear el pedido. (${LAST_ORDER_ERROR})`
-      : "No se pudo crear el pedido.";
-    alert(msg);
+    alert("No se pudo crear el pedido. Revisa tu conexión e intenta otra vez.");
     return;
   }
 
@@ -507,7 +507,23 @@ async function initLiveFirebase(){
     fb.onSnapshot(fb.collection(db, "products"), (snap)=>{
       const arr=[];
       snap.forEach(d=>arr.push({ id:d.id, ...d.data() }));
-      FB_PRODUCTS_CACHE = arr
+      const normCat = (v)=>{
+        const s=String(v||"").toLowerCase();
+        if(s.startsWith("electr")) return "electronica";
+        if(s.startsWith("bisut")) return "perfumeria";
+        if(s.startsWith("perfum")) return "perfumeria";
+        if(s.startsWith("ropa")) return "ropa";
+        if(s.startsWith("calz")) return "calzado";
+        return (CONFIG.categories||[]).some(c=>c.id===s) ? s : (v||"");
+      };
+      const fixed = arr.map(p=>({
+        ...p,
+        category: normCat(p.category),
+        subcategory: p.subcategory||p.sub||"",
+        measureLabel: p.measureLabel||p.sizeLabel||"Talla",
+        size: p.size||p.sizeValue||"",
+      }));
+      FB_PRODUCTS_CACHE = fixed
         .filter(p => (p && (p.active === undefined ? true : !!p.active)))
         .sort((a,b)=>{
           const ta=a.updatedAt?.seconds||0; const tb=b.updatedAt?.seconds||0;
@@ -558,8 +574,8 @@ async function upsertCustomerProfile(profile){
 }
 
 async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile }){
+  let orderId = "";
   try{
-    LAST_ORDER_ERROR = null;
     const u = await ensureAnon();
     if(!u) throw new Error("anon-auth-failed");
 
@@ -573,7 +589,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         price: Number(p.price||0),
         qty: Number(c.qty||1),
         category: p.category||c.category||"",
-        sub: p.sub||c.sub||"",
+        sub: p.subcategory||p.sub||c.subcategory||c.sub||"",
       };
     });
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
@@ -582,7 +598,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     const payNow = Math.round((total*0.5)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
 
-    // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
+    // 1) Crear el pedido primero para tener ID (esto es lo único "obligatorio")
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
       customerUid: u.uid,
       shipping,
@@ -594,15 +610,14 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       status: proofFile ? "recibo_subido" : "nuevo",
       trackingNumber: "",
       pointsEarned,
+      proofUrl: "",
+      proofName: "",
       createdAt: fb.serverTimestamp(),
       updatedAt: fb.serverTimestamp(),
     });
-    const orderId = orderRef.id;
+    orderId = orderRef.id;
 
-    // A PARTIR DE AQUÍ: todo es "best effort".
-    // Si algo falla (Storage, stock, cliente), igual devolvemos el orderId.
-
-    // 2) Subir comprobante (si existe) — si falla NO bloquea el pedido
+    // 2) Subir comprobante (si existe) — NO debe bloquear el pedido
     if(proofFile){
       try{
         const safeName = (proofFile.name||"pago.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
@@ -613,66 +628,73 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         await fb.updateDoc(fb.doc(db, "orders", orderId), {
           proofUrl,
           proofName: safeName,
-          status: "recibo_subido",
           updatedAt: fb.serverTimestamp(),
         });
       }catch(e){
-        console.warn("Proof upload failed:", e);
-        // marcamos el pedido para que admin sepa que faltó comprobante
-        try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { status:"nuevo", proofError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
+        console.warn("Proof upload failed (order still created):", e);
+        // Guardamos el error para que el admin lo vea si quiere
+        try{
+          await fb.updateDoc(fb.doc(db, "orders", orderId), {
+            proofError: String(e?.code||e?.message||e),
+            updatedAt: fb.serverTimestamp(),
+          });
+        }catch{}
       }
     }
 
-    // 3) Descontar stock + actualizar cliente (transacción)
-    // OJO: si tus Rules NO permiten al cliente modificar products/customers, esto fallará.
-    // En ese caso, igual devolvemos orderId.
-    try{ await fb.runTransaction(db, async (tx)=>{
-      // stock
-      for(const it of items){
-        const pref = fb.doc(db, "products", it.id);
-        const snap = await tx.get(pref);
-        if(!snap.exists()) continue;
-        const cur = snap.data().stock ?? 0;
-        const next = Math.max(0, Number(cur) - Number(it.qty||1));
-        tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
-      }
-      // cliente
-      const cref = fb.doc(db, "customers", u.uid);
-      const csnap = await tx.get(cref);
-      const prev = csnap.exists() ? csnap.data() : {};
-      const prevPoints = Number(prev.points||0);
-      const prevSpent = Number(prev.totalSpent||0);
-      const prevCount = Number(prev.ordersCount||0);
-      tx.set(cref, {
-        uid: u.uid,
-        fullName: shipping.fullName,
-        cedula: shipping.cedula,
-        phone: shipping.phone,
-        city: shipping.city,
-        address: shipping.address,
-        reference: shipping.reference||"",
-        points: prevPoints + pointsEarned,
-        totalSpent: Math.round((prevSpent + subtotal)*100)/100,
-        ordersCount: prevCount + 1,
-        lastOrderId: orderId,
-        lastOrderAt: fb.serverTimestamp(),
-        updatedAt: fb.serverTimestamp(),
-        createdAt: prev.createdAt || fb.serverTimestamp(),
-      }, { merge:true });
-    }); }catch(e){
-      console.warn("Post-order transaction failed:", e);
-      try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { postProcessError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
+    // 3) Descontar stock + actualizar cliente — NO debe bloquear el pedido
+    try{
+      await fb.runTransaction(db, async (tx)=>{
+        // stock
+        for(const it of items){
+          const pref = fb.doc(db, "products", it.id);
+          const snap = await tx.get(pref);
+          if(!snap.exists()) continue;
+          const cur = snap.data().stock ?? 0;
+          const next = Math.max(0, Number(cur) - Number(it.qty||1));
+          tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
+        }
+        // cliente
+        const cref = fb.doc(db, "customers", u.uid);
+        const csnap = await tx.get(cref);
+        const prev = csnap.exists() ? csnap.data() : {};
+        const prevPoints = Number(prev.points||0);
+        const prevSpent = Number(prev.totalSpent||0);
+        const prevCount = Number(prev.ordersCount||0);
+        tx.set(cref, {
+          uid: u.uid,
+          fullName: shipping.fullName,
+          cedula: shipping.cedula,
+          phone: shipping.phone,
+          city: shipping.city,
+          address: shipping.address,
+          reference: shipping.reference||"",
+          points: prevPoints + pointsEarned,
+          totalSpent: Math.round((prevSpent + subtotal)*100)/100,
+          ordersCount: prevCount + 1,
+          lastOrderId: orderId,
+          lastOrderAt: fb.serverTimestamp(),
+          updatedAt: fb.serverTimestamp(),
+          createdAt: prev.createdAt || fb.serverTimestamp(),
+        }, { merge:true });
+      });
+    }catch(e){
+      console.warn("Post-order transaction failed (order still created):", e);
+      try{
+        await fb.updateDoc(fb.doc(db, "orders", orderId), {
+          postError: String(e?.code||e?.message||e),
+          updatedAt: fb.serverTimestamp(),
+        });
+      }catch{}
     }
 
     return orderId;
   }catch(e){
     console.warn("Order create failed:", e);
-    // Guardamos el error real para mostrarlo
-    LAST_ORDER_ERROR = e?.code || e?.message || String(e);
-    return null;
+    // Si ya existe un orderId, lo devolvemos (por si algo falló después)
+    return orderId || null;
   }
 }
-
 
 ensurePWA();
 buildCategoryPills();

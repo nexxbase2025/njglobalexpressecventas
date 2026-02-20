@@ -9,13 +9,7 @@ const escapeHtml = (s)=>String(s??"")
   .replaceAll('"',"&quot;")
   .replaceAll("'","&#039;");
 
-// Si es un modal, debe ser flex (si no, se queda oculto por CSS)
-function show(id){
-  const el=$(id);
-  if(!el) return;
-  if(el.classList && el.classList.contains("modal")) el.style.display="flex";
-  else el.style.display="";
-}
+function show(id){ const el=$(id); if(el) el.style.display=""; }
 function hide(id){ const el=$(id); if(el) el.style.display="none"; }
 
 function setActiveTab(tab){
@@ -30,6 +24,22 @@ function money(n){
   const v = Number(n||0);
   return `$${v.toFixed(2)}`;
 }
+
+function labelCategory(id){
+  const c = (CONFIG.categories||[]).find(x=>x.id===id);
+  return c ? c.label : (id||"");
+}
+
+function normalizeCategory(v){
+  const s = String(v||"").toLowerCase();
+  if(s.startsWith("electr")) return "electronica";
+  if(s.startsWith("bisut")) return "perfumeria";
+  if(s.startsWith("perfum")) return "perfumeria";
+  if(s.startsWith("ropa")) return "ropa";
+  if(s.startsWith("calz")) return "calzado";
+  return (CONFIG.categories||[]).some(c=>c.id===s) ? s : "";
+}
+
 
 async function requireAdmin(){
   const u = auth.currentUser;
@@ -114,6 +124,7 @@ async function loadClientes(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
+    const visible = items.filter(p=>p.active !== false);
 
     wrap.innerHTML = items.length ? items.map(c=>{
       const name = c.fullName || "(sin nombre)";
@@ -246,9 +257,9 @@ $("btnAddProduct").addEventListener("click", ()=>{
   $("pmBrand").value="";
   $("pmPrice").value="";
   $("pmStock").value="";
-  $("pmCategory").value="Ropa";
-  $("pmSub").value="";
-  $("pmSizeLabel").value="";
+  $("pmCategory").value="calzado";
+  $("pmSub").value="Caballero";
+  $("pmSizeLabel").value="Talla";
   $("pmSizeValue").value="";
   $("pmCm").value="";
   $("pmImage").value="";
@@ -262,16 +273,16 @@ $("pmSave").addEventListener("click", async ()=>{
   const title = $("pmTitle").value.trim();
   const brand = $("pmBrand").value.trim();
   const category = $("pmCategory").value;
-  const sub = $("pmSub").value;
+  const subcategory = $("pmSub").value;
   const price = Number($("pmPrice").value||0);
   const stock = Number($("pmStock").value||0);
-  const sizeLabel = $("pmSizeLabel").value.trim();
-  const sizeValue = $("pmSizeValue").value.trim();
+  const measureLabel = ($("pmSizeLabel").value||"Talla").trim();
+  const size = $("pmSizeValue").value.trim();
   const cm = $("pmCm").value.trim();
   const file = $("pmImage").files?.[0] || null;
 
   if(!title || !category){
-    alert("Completa al menos: Título y Categoría.");
+    alert("Completa al menos: Producto y Categoría.");
     return;
   }
 
@@ -288,13 +299,13 @@ $("pmSave").addEventListener("click", async ()=>{
     const payload = {
       title,
       brand,
-      category,
-      sub,
+      category,          // id: ropa | calzado | perfumeria | electronica
+      subcategory,       // Dama | Caballero | Niños | Varios (opcional)
       price,
       stock,
-      sizeLabel,
-      sizeValue,
-      cm,
+      measureLabel,      // por defecto "Talla"
+      size,              // valor manual (ej: 42 / L / 250 ml)
+      cm,                // opcional (solo calzado)
       imageUrl,
       active: true,
       updatedAt: fb.serverTimestamp(),
@@ -302,7 +313,9 @@ $("pmSave").addEventListener("click", async ()=>{
     };
 
     if(id){
-      await fb.updateDoc(fb.doc(db,"products",id), payload);
+      const p2 = { ...payload };
+      delete p2.createdAt;
+      await fb.updateDoc(fb.doc(db,"products",id), p2);
     }else{
       await fb.addDoc(fb.collection(db,"products"), payload);
     }
@@ -311,7 +324,7 @@ $("pmSave").addEventListener("click", async ()=>{
     await loadProducts();
   }catch(e){
     console.warn(e);
-    alert("No se pudo guardar el producto.");
+    alert("No se pudo guardar el producto. " + (e?.code||e?.message||e));
   }
 });
 
@@ -327,12 +340,11 @@ async function loadProducts(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
-
-    const visible = items.filter(p => (p && (p.active === undefined ? true : !!p.active)));
+    const visible = items.filter(p=>p.active !== false);
 
     wrap.innerHTML = visible.length ? visible.map(p=>{
-      const meta = [p.brand, p.category, p.sub].filter(Boolean).join(" • ");
-      const size = p.sizeLabel && p.sizeValue ? `${p.sizeLabel}: ${p.sizeValue}` : (p.sizeValue?`${p.sizeValue}`:"");
+      const meta = [p.brand, labelCategory(p.category), p.subcategory||p.sub].filter(Boolean).join(" • ");
+      const size = (p.measureLabel||p.sizeLabel) && (p.size||p.sizeValue) ? `${escapeHtml(p.measureLabel||p.sizeLabel)}: ${escapeHtml(p.size||p.sizeValue)}` : "";
       const cm = p.cm ? ` • cm: ${escapeHtml(p.cm)}` : "";
       return `
       <div class="item" style="align-items:flex-start;">
@@ -355,18 +367,18 @@ async function loadProducts(){
     wrap.querySelectorAll("[data-edit]").forEach(btn=>{
       btn.addEventListener("click", ()=>{
         const id = btn.getAttribute("data-edit");
-        const p = visible.find(x=>x.id===id);
+        const p = visible.find(x=>x.id===id) || items.find(x=>x.id===id);
         if(!p) return;
         show("productModal");
         $("pmId").value = p.id;
         $("pmTitle").value = p.title||"";
         $("pmBrand").value = p.brand||"";
-        $("pmCategory").value = p.category||"Ropa";
-        $("pmSub").value = p.sub||"";
+        $("pmCategory").value = normalizeCategory(p.category) || "calzado";
+        $("pmSub").value = (p.subcategory||p.sub||"");
         $("pmPrice").value = p.price||0;
         $("pmStock").value = p.stock||0;
-        $("pmSizeLabel").value = p.sizeLabel||"";
-        $("pmSizeValue").value = p.sizeValue||"";
+        $("pmSizeLabel").value = (p.measureLabel||p.sizeLabel||"Talla");
+        $("pmSizeValue").value = (p.size||p.sizeValue||"");
         $("pmCm").value = p.cm||"";
         $("pmImage").value = "";
         $("pmImageUrl").value = p.imageUrl||"";
@@ -378,16 +390,11 @@ async function loadProducts(){
         const id = btn.getAttribute("data-del");
         if(!confirm("¿Eliminar este producto?")) return;
         try{
-          // Intentar borrar de verdad. Si Rules no permiten delete, hacemos "desactivar".
-          try{
-            await fb.deleteDoc(fb.doc(db,"products",id));
-          }catch(_){
-            await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
-          }
+          await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
           await loadProducts();
         }catch(e){
           console.warn(e);
-          alert("No se pudo eliminar. Revisa Rules de Firestore (products).");
+          alert("No se pudo eliminar. " + (e?.code||e?.message||e));
         }
       });
     });

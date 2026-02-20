@@ -7,7 +7,7 @@ import {
   signInAnonymously, signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { 
-  getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
+  getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc,
   getDocs, query, where, orderBy, limit, serverTimestamp, Timestamp, onSnapshot, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
@@ -20,7 +20,7 @@ export const db = getFirestore(app);
 export const storage = getStorage(app);
 
 export const fb = {
-  collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, setDoc, addDoc, updateDoc,
   getDocs, query, where, orderBy, limit, serverTimestamp, Timestamp, onSnapshot, runTransaction,
   ref, uploadBytes, getDownloadURL,
   onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut
