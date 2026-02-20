@@ -550,7 +550,6 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     if(btn){ btn.disabled = false; btn.textContent = prevTxt || "Realizar pedido"; }
   }
 });
-);
 
 
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m])); }
