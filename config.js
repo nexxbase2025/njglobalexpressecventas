@@ -25,16 +25,16 @@ categoryColors: {
   all: "rgba(0,180,255,.18)",
   ropa: "rgba(255,60,90,.20)",
   calzado: "rgba(0,200,255,.18)",
-  perfumeria: "rgba(0,255,170,.16)",
+  bisuteria: "rgba(0,255,170,.16)",
   electronica: "rgba(170,120,255,.18)",
 },
 
 categories: [
 
-    { id: "ropa", label: "Ropa", subs: ["Dama", "Caballero", "Niños", "Varios"] },
-    { id: "calzado", label: "Calzado", subs: ["Dama", "Caballero", "Niños", "Varios"] },
-    { id: "perfumeria", label: "Perfumería", subs: ["Dama", "Caballero", "Niños", "Varios"] },
-    { id: "electronica", label: "Electrónica", subs: ["Varios"] },
+    { id: "ropa", label: "Ropa", subs: ["Dama", "Caballero", "Niños"] },
+    { id: "calzado", label: "Calzado", subs: ["Dama", "Caballero", "Niños"] },
+    { id: "bisuteria", label: "Bisutería", subs: ["Dama", "Caballero", "Niños"] },
+    { id: "electronica", label: "Electrónica", subs: [] },
   ],
 
   featuredRotationMs: 6500,
