@@ -408,7 +408,7 @@ function renderOrders(){
 function fileToDataUrl(file){
   return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result)); r.onerror=rej; r.readAsDataURL(file); });
 }
-function buildWhatsAppMessage(order){
+function buildWhatsAppMessage(order, extra={}){
   const lines=[];
   lines.push(`🧾 *Pedido ${CONFIG.appName}*`);
   lines.push(`ID: *${order.id}*`,"");
@@ -420,12 +420,18 @@ function buildWhatsAppMessage(order){
   lines.push("","👤 *Datos de envío:*");
   lines.push(`Nombre: ${order.shipping.fullName}`,`Cédula: ${order.shipping.cedula}`,`Teléfono: ${order.shipping.phone}`,`Ciudad: ${order.shipping.city}`,`Dirección: ${order.shipping.address}`);
   if(order.shipping.reference) lines.push(`Referencia: ${order.shipping.reference}`);
-  lines.push("","💳 *Pago por transferencia/depósito*","Adjunto comprobante en el sistema.");
-  return encodeURIComponent(lines.join("\n"));
+  lines.push("","💳 *Pago por transferencia/depósito*");
+  if(extra?.proofUrl){
+    lines.push(`Comprobante (link): ${extra.proofUrl}`);
+  }else{
+    lines.push("Comprobante: guardado en el sistema.");
+  }
+  return lines.join("\n");
 }
 function openWhatsApp(order){
   const e164=toWhatsAppE164(CONFIG.whatsapp);
-  window.open(`https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`,"_blank","noopener,noreferrer");
+  const msg = buildWhatsAppMessage(order);
+  window.open(`https://wa.me/${e164}?text=${encodeURIComponent(msg)}`,"_blank");
 }
 
 function renderCart(){
@@ -454,28 +460,24 @@ function renderCart(){
 }
 
 $("btnPlaceOrder").addEventListener("click", async ()=>{
-  // Abrimos la ventana de WhatsApp *antes* de los awaits para evitar bloqueos en móviles.
-  const waPopup = window.open("about:blank","_blank","noopener,noreferrer");
-  if(!waPopup){
-    alert("Tu navegador bloqueó la ventana de WhatsApp. Activa los pop-ups y vuelve a intentar.");
-    return;
-  }
+  // En iPhone/Safari, abrir una ventana y luego redirigir suele terminar en about:blank.
+  // Hacemos: crear pedido -> intentar abrir WhatsApp en la MISMA pestaña.
+  // Si el navegador lo bloquea, dejamos un botón manual (tap directo) para enviarlo.
 
   const shipping=getShipping();
-  if(!shipping){ waPopup.close(); openModal("modalReg"); return; }
+  if(!shipping){ openModal("modalReg"); return; }
 
   const cart=getCart();
   const enriched=enrichCart(cart);
-  if(!enriched.length){ waPopup.close(); alert("Carrito vacío."); return; }
+  if(!enriched.length){ alert("Carrito vacío."); return; }
 
   for(const {ci,p} of enriched){
-    if((p.stock||0) < (ci.qty||0)){ waPopup.close(); alert(`Stock insuficiente para: ${p.title}`); return; }
+    if((p.stock||0) < (ci.qty||0)){ alert(`Stock insuficiente para: ${p.title}`); return; }
   }
 
   // Requerir comprobante para poder crear el pedido
   const file=$("proof").files?.[0]||null;
   if(!file){
-    waPopup.close();
     alert("Adjunta el comprobante de pago antes de realizar el pedido.");
     return;
   }
@@ -485,12 +487,13 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
   const totalFinal=ship>0?subtotal+ship:null;
   const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(totalFinal??subtotal);
 
-  const orderId = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
+  const created = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
+  const orderId = created?.orderId || null;
+  const proofUrl = created?.proofUrl || null;
   if(!orderId){
     const msg = LAST_ORDER_ERROR
       ? `No se pudo crear el pedido. (${LAST_ORDER_ERROR})`
       : "No se pudo crear el pedido.";
-    waPopup.close();
     alert(msg);
     return;
   }
@@ -506,15 +509,17 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     totalFinal,
   };
 
-  // Guardar en silencio y luego abrir WhatsApp Business con el pedido
+  // Intento automático: abrir WhatsApp en la MISMA pestaña.
+  // Nota: WhatsApp por link NO puede adjuntar imágenes automáticamente.
+  // Solución práctica: guardamos el comprobante en Firebase y mandamos el LINK en el mensaje.
+  let waUrl = "";
   try{
     const e164=toWhatsAppE164(CONFIG.whatsapp || "0983706294");
-    waPopup.location.href = `https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`;
-    try{ waPopup.focus(); }catch{}
+    const msg = buildWhatsAppMessage(order, { proofUrl });
+    waUrl = `https://wa.me/${e164}?text=${encodeURIComponent(msg)}`;
+    window.location.href = waUrl;
   }catch(e){
     console.warn(e);
-    try{ waPopup.close(); }catch{}
-    alert("Se creó el pedido, pero no se pudo abrir WhatsApp.");
   }
 
   // Limpiar UI
@@ -522,11 +527,29 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
   bindProofInput();
   setCart([]); updateCartBadge(); renderCart();
 
-  // Mostrar confirmación (opcional)
+  // Mostrar confirmación + botón manual (por si el navegador bloqueó WhatsApp)
   const resBox = $("orderResult");
   const resTxt = $("orderResultText");
-  if(resTxt) resTxt.textContent = `ID: ${order.id} • Total: ${formatMoney(due)} • Comprobante adjunto ✅`;
+  const btn = $("btnSendWhats");
+  if(resTxt) resTxt.textContent = `ID: ${order.id} • Total: ${formatMoney(due)} • Comprobante guardado ✅`;
+  if(btn){
+    if(waUrl){
+      btn.style.display = "inline-flex";
+      btn.onclick = ()=>{ window.location.href = waUrl; };
+    }else{
+      btn.style.display = "none";
+    }
+  }
   if(resBox) resBox.style.display = "block";
+
+  // Seguir comprando
+  const btnNew = $("btnNewOrder");
+  if(btnNew){
+    btnNew.onclick = ()=>{
+      if(resBox) resBox.style.display = "none";
+      try{ window.scrollTo({ top:0, behavior:"smooth" }); }catch(_){ }
+    };
+  }
 });
 
 
@@ -623,6 +646,8 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     const payNow = Math.round((total*0.5)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
 
+    let proofUrlReturn = null;
+
     // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
       customerUid: u.uid,
@@ -651,6 +676,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         const r = fb.ref(storage, path);
         await fb.uploadBytes(r, proofFile);
         const proofUrl = await fb.getDownloadURL(r);
+        proofUrlReturn = proofUrl;
         await fb.updateDoc(fb.doc(db, "orders", orderId), {
           proofUrl,
           proofName: safeName,
@@ -705,7 +731,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { postProcessError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
     }
 
-    return orderId;
+    return { orderId, proofUrl: proofUrlReturn };
   }catch(e){
     console.warn("Order create failed:", e);
     // Guardamos el error real para mostrarlo
