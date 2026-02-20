@@ -9,7 +9,13 @@ const escapeHtml = (s)=>String(s??"")
   .replaceAll('"',"&quot;")
   .replaceAll("'","&#039;");
 
-function show(id){ const el=$(id); if(!el) return; if(el.classList && el.classList.contains("modal")){ el.style.display="flex"; } else { el.style.display=""; } }
+// Si es un modal, debe ser flex (si no, se queda oculto por CSS)
+function show(id){
+  const el=$(id);
+  if(!el) return;
+  if(el.classList && el.classList.contains("modal")) el.style.display="flex";
+  else el.style.display="";
+}
 function hide(id){ const el=$(id); if(el) el.style.display="none"; }
 
 function setActiveTab(tab){
@@ -25,7 +31,7 @@ function money(n){
   return `$${v.toFixed(2)}`;
 }
 
-async async function requireAdmin(){
+async function requireAdmin(){
   const u = auth.currentUser;
   if(!u) return false;
 
@@ -108,9 +114,8 @@ async function loadClientes(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
-    const visible = items.filter(p=>p.active!==false);
 
-    wrap.innerHTML = visible.length ? visible.map(p=> items.map(c=>{
+    wrap.innerHTML = items.length ? items.map(c=>{
       const name = c.fullName || "(sin nombre)";
       const pts = Number(c.points||0);
       const spent = Number(c.totalSpent||0);
@@ -323,6 +328,8 @@ async function loadProducts(){
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
 
+    const visible = items.filter(p => (p && (p.active === undefined ? true : !!p.active)));
+
     wrap.innerHTML = visible.length ? visible.map(p=>{
       const meta = [p.brand, p.category, p.sub].filter(Boolean).join(" • ");
       const size = p.sizeLabel && p.sizeValue ? `${p.sizeLabel}: ${p.sizeValue}` : (p.sizeValue?`${p.sizeValue}`:"");
@@ -371,11 +378,16 @@ async function loadProducts(){
         const id = btn.getAttribute("data-del");
         if(!confirm("¿Eliminar este producto?")) return;
         try{
-          await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
+          // Intentar borrar de verdad. Si Rules no permiten delete, hacemos "desactivar".
+          try{
+            await fb.deleteDoc(fb.doc(db,"products",id));
+          }catch(_){
+            await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
+          }
           await loadProducts();
         }catch(e){
           console.warn(e);
-          alert(`No se pudo eliminar. (${e.code||"error"}): ${e.message||e}`);
+          alert("No se pudo eliminar. Revisa Rules de Firestore (products).");
         }
       });
     });

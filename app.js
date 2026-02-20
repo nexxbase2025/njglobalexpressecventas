@@ -1,7 +1,6 @@
 import { CONFIG } from "./config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 
-let LAST_ORDER_ERROR = null;
 const K = { shipping:"njge_shipping", cart:"njge_cart", orders:"njge_orders", products:"njge_products" };
 const $ = (id)=>document.getElementById(id);
 
@@ -59,7 +58,7 @@ function getProducts(){
   if(FB_PRODUCTS_CACHE) return FB_PRODUCTS_CACHE;
   const stored=getJSON(K.products,null);
   const list=(stored&&stored.length)?stored:[];
-  return list.filter(p=>p && p.active!==false).map(normalizeProduct);
+  return list.map(normalizeProduct);
 }
 function setProducts(p){ setJSON(K.products,p); }
 
@@ -469,9 +468,11 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
   const file=$("proof").files?.[0]||null;
   const orderId = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
   if(!orderId){
-    alert(`No se pudo crear el pedido.
-${(LAST_ORDER_ERROR && (LAST_ORDER_ERROR.code||LAST_ORDER_ERROR.name))?`Error: ${(LAST_ORDER_ERROR.code||LAST_ORDER_ERROR.name)}
-`:``}${LAST_ORDER_ERROR? (LAST_ORDER_ERROR.message||String(LAST_ORDER_ERROR)) : "Revisa tu conexión e intenta otra vez."}`);
+    // Mostrar el error real, no "internet".
+    const msg = LAST_ORDER_ERROR
+      ? `No se pudo crear el pedido. (${LAST_ORDER_ERROR})`
+      : "No se pudo crear el pedido.";
+    alert(msg);
     return;
   }
 
@@ -557,9 +558,8 @@ async function upsertCustomerProfile(profile){
 }
 
 async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile }){
-  let orderId = null;
-  LAST_ORDER_ERROR = null;
   try{
+    LAST_ORDER_ERROR = null;
     const u = await ensureAnon();
     if(!u) throw new Error("anon-auth-failed");
 
@@ -582,7 +582,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     const payNow = Math.round((total*0.5)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
 
-    // 1) Crear pedido (SI esto falla, no hay nada que hacer)
+    // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
       customerUid: u.uid,
       shipping,
@@ -591,15 +591,18 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       shippingCost: ship,
       total,
       payNow,
-      status: proofFile ? "recibo_pendiente" : "nuevo",
+      status: proofFile ? "recibo_subido" : "nuevo",
       trackingNumber: "",
       pointsEarned,
       createdAt: fb.serverTimestamp(),
       updatedAt: fb.serverTimestamp(),
     });
-    orderId = orderRef.id;
+    const orderId = orderRef.id;
 
-    // 2) Subir comprobante (NO debe bloquear la creación del pedido)
+    // A PARTIR DE AQUÍ: todo es "best effort".
+    // Si algo falla (Storage, stock, cliente), igual devolvemos el orderId.
+
+    // 2) Subir comprobante (si existe) — si falla NO bloquea el pedido
     if(proofFile){
       try{
         const safeName = (proofFile.name||"pago.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
@@ -615,67 +618,58 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         });
       }catch(e){
         console.warn("Proof upload failed:", e);
-        // Guardamos info en el pedido, pero NO fallamos la compra
-        try{
-          await fb.updateDoc(fb.doc(db,"orders",orderId), {
-            status: "recibo_error",
-            proofError: (e && (e.code || e.message)) ? String(e.code||e.message) : "proof-upload-failed",
-            updatedAt: fb.serverTimestamp(),
-          });
-        }catch(_){}
+        // marcamos el pedido para que admin sepa que faltó comprobante
+        try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { status:"nuevo", proofError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
       }
     }
 
-    // 3) Descontar stock + actualizar cliente (NO debe bloquear el pedido)
-    try{
-      await fb.runTransaction(db, async (tx)=>{
-        for(const it of items){
-          const pref = fb.doc(db, "products", it.id);
-          const snap = await tx.get(pref);
-          if(!snap.exists()) continue;
-          const cur = snap.data().stock ?? 0;
-          const next = Math.max(0, Number(cur) - Number(it.qty||1));
-          tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
-        }
-        const cref = fb.doc(db, "customers", u.uid);
-        const csnap = await tx.get(cref);
-        const prev = csnap.exists() ? csnap.data() : {};
-        const prevPoints = Number(prev.points||0);
-        const prevSpent = Number(prev.totalSpent||0);
-        const prevCount = Number(prev.ordersCount||0);
-        tx.set(cref, {
-          uid: u.uid,
-          fullName: shipping.fullName,
-          cedula: shipping.cedula,
-          phone: shipping.phone,
-          city: shipping.city,
-          address: shipping.address,
-          reference: shipping.reference||"",
-          points: prevPoints + pointsEarned,
-          totalSpent: Math.round((prevSpent + subtotal)*100)/100,
-          ordersCount: prevCount + 1,
-          lastOrderId: orderId,
-          lastOrderAt: fb.serverTimestamp(),
-          updatedAt: fb.serverTimestamp(),
-          createdAt: prev.createdAt || fb.serverTimestamp(),
-        }, { merge:true });
-      });
-    }catch(e){
+    // 3) Descontar stock + actualizar cliente (transacción)
+    // OJO: si tus Rules NO permiten al cliente modificar products/customers, esto fallará.
+    // En ese caso, igual devolvemos orderId.
+    try{ await fb.runTransaction(db, async (tx)=>{
+      // stock
+      for(const it of items){
+        const pref = fb.doc(db, "products", it.id);
+        const snap = await tx.get(pref);
+        if(!snap.exists()) continue;
+        const cur = snap.data().stock ?? 0;
+        const next = Math.max(0, Number(cur) - Number(it.qty||1));
+        tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
+      }
+      // cliente
+      const cref = fb.doc(db, "customers", u.uid);
+      const csnap = await tx.get(cref);
+      const prev = csnap.exists() ? csnap.data() : {};
+      const prevPoints = Number(prev.points||0);
+      const prevSpent = Number(prev.totalSpent||0);
+      const prevCount = Number(prev.ordersCount||0);
+      tx.set(cref, {
+        uid: u.uid,
+        fullName: shipping.fullName,
+        cedula: shipping.cedula,
+        phone: shipping.phone,
+        city: shipping.city,
+        address: shipping.address,
+        reference: shipping.reference||"",
+        points: prevPoints + pointsEarned,
+        totalSpent: Math.round((prevSpent + subtotal)*100)/100,
+        ordersCount: prevCount + 1,
+        lastOrderId: orderId,
+        lastOrderAt: fb.serverTimestamp(),
+        updatedAt: fb.serverTimestamp(),
+        createdAt: prev.createdAt || fb.serverTimestamp(),
+      }, { merge:true });
+    }); }catch(e){
       console.warn("Post-order transaction failed:", e);
-      try{
-        await fb.updateDoc(fb.doc(db,"orders",orderId), {
-          postProcessError: (e && (e.code || e.message)) ? String(e.code||e.message) : "post-process-failed",
-          updatedAt: fb.serverTimestamp(),
-        });
-      }catch(_){}
+      try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { postProcessError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
     }
 
     return orderId;
   }catch(e){
     console.warn("Order create failed:", e);
-    LAST_ORDER_ERROR = e;
-    // Si el pedido ya se creó, devolvemos el ID igual
-    return orderId;
+    // Guardamos el error real para mostrarlo
+    LAST_ORDER_ERROR = e?.code || e?.message || String(e);
+    return null;
   }
 }
 
