@@ -492,14 +492,33 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
   bindProofInput();
   setCart([]); updateCartBadge(); renderCart();
 
-  // WhatsApp
-  openWhatsApp(order);
+  // Mostrar confirmación en pantalla (y abrir WhatsApp SOLO cuando el usuario toque el botón)
+  LAST_ORDER_FOR_WHATSAPP = order;
+  const resBox = $("orderResult");
+  const resTxt = $("orderResultText");
+  const btnW = $("btnSendWhats");
+  const btnN = $("btnNewOrder");
+  if(resTxt) resTxt.textContent = `ID: ${order.id} • Total: ${formatMoney(due)}${file? " • Comprobante adjunto ✅" : " • Falta comprobante ⚠️"}`;
+  if(resBox) resBox.style.display = "block";
+  if(btnW){
+    btnW.onclick = ()=>{ try{ openWhatsApp(LAST_ORDER_FOR_WHATSAPP); }catch(e){ console.warn(e); alert("No se pudo abrir WhatsApp."); } };
+  }
+  if(btnN){
+    btnN.onclick = ()=>{ if(resBox) resBox.style.display="none"; alert("Listo ✅ Puedes seguir comprando."); };
+  }
 });
 
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m])); }
 
 async function initLiveFirebase(){
   bindProofInput();
+  // Botón visible para adjuntar comprobante
+  const pickBtn = $("btnProofPick");
+  const proofInp = $("proof");
+  const proofLbl = $("proofName");
+  const pick = ()=>{ try{ proofInp?.click(); }catch(_){ } };
+  if(pickBtn) pickBtn.addEventListener("click", pick);
+  if(proofLbl) proofLbl.addEventListener("click", pick);
   // Evita que “productos demo” guardados en el navegador se mezclen con Firestore.
   try{ localStorage.removeItem(K.products); }catch(e){}
   // Productos (stock global)

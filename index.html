@@ -159,11 +159,21 @@
             <div class="small" style="font-weight:950; margin-bottom:6px;">Sube foto o captura del comprobante</div>
             <!-- Ocultamos el input nativo para que NO aparezca el botón "Seleccionar archivo" duplicado -->
             <input class="input" id="proof" type="file" accept="image/*" style="display:none" />
-            <div class="small" id="proofName" style="margin-top:6px; opacity:.85;">Comprobante de pago: ningún archivo</div>
+            <div class="small" id="proofName" style="margin-top:6px; opacity:.85; cursor:pointer;">Comprobante de pago: ningún archivo</div>
+            <button class="btn" id="btnProofPick" type="button" style="margin-top:8px;">Adjuntar comprobante</button>
           </div>
           <button class="btn primary" id="btnPlaceOrder">Realizar pedido</button>
 
-          <div class="small">Se crea un ID y se abre WhatsApp con el pedido.</div>
+          <div id="orderResult" class="panel" style="margin-top:12px; display:none;">
+            <div style="font-weight:980;">✅ Pedido creado</div>
+            <div class="small" id="orderResultText" style="margin-top:6px;"></div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+              <button class="btn primary" id="btnSendWhats" type="button">Enviar por WhatsApp</button>
+              <button class="btn" id="btnNewOrder" type="button">Seguir comprando</button>
+            </div>
+          </div>
+
+          <div class="small">Se crea un ID y luego tú decides si lo envías por WhatsApp.</div>
         </div>
       </div>
 

@@ -206,7 +206,10 @@ function renderOrders(orders){
         <div class="small" style="margin-top:4px;">Cliente: <b>${escapeHtml(ship.fullName||"-")}</b> • Tel: <b>${escapeHtml(ship.phone||"-")}</b></div>
         <div class="small" style="margin-top:6px; line-height:1.35;">${lines || "(sin items)"}</div>
         <div class="small" style="margin-top:6px;">Subtotal: <b>${money(o.subtotal||0)}</b> • Envío: <b>${money(o.shippingCost||0)}</b> • Total: <b>${money(o.total||0)}</b></div>
-        ${proofUrl?`<div style="margin-top:10px;"><a class="btn" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener noreferrer">Ver comprobante</a></div>`:""}
+        ${proofUrl?`<div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+  <a class="btn" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener noreferrer">Ver comprobante</a>
+  <img class="proofThumb" src="${escapeHtml(proofUrl)}" alt="Comprobante" style="height:70px; border-radius:10px; border:1px solid rgba(255,255,255,.15);" />
+</div>`:""}
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; min-width:170px;">
         <select class="input" data-status="${escapeHtml(o.id)}">
