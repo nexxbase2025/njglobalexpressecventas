@@ -4,6 +4,9 @@ import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 const K = { shipping:"njge_shipping", cart:"njge_cart", orders:"njge_orders", products:"njge_products" };
 const $ = (id)=>document.getElementById(id);
 
+let LAST_WA_URL = null;
+let LAST_ORDER_ERROR = null;
+
 function getJSON(k,f){ try{ const r=localStorage.getItem(k); return r?JSON.parse(r):f; }catch{ return f; } }
 function setJSON(k,v){ localStorage.setItem(k, JSON.stringify(v)); }
 function formatMoney(n){ return `$${Number(n||0).toFixed(2)}`; }
@@ -45,14 +48,20 @@ let MY_ORDERS = [];
 function bindProofInput(){
   const inp = $("proof");
   const label = $("proofName");
+  const fileBtn = document.querySelector('label.filebtn[for="proof"]');
   if(!inp || !label) return;
   const update = ()=>{
     const f = inp.files?.[0];
-    label.textContent = f ? f.name : "Comprobante de pago: ningún archivo";
+    label.textContent = f ? f.name : "Ningún archivo seleccionado";
   };
   inp.addEventListener("change", update);
+  // Permite abrir el selector tocando el texto o el botón/label
+  const pick = ()=>{ try{ inp.click(); }catch(_){ } };
+  label.addEventListener("click", pick);
+  if(fileBtn) fileBtn.addEventListener("click", pick);
   update();
 }
+
 
 function getProducts(){
   if(FB_PRODUCTS_CACHE) return FB_PRODUCTS_CACHE;
@@ -408,7 +417,7 @@ function renderOrders(){
 function fileToDataUrl(file){
   return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result)); r.onerror=rej; r.readAsDataURL(file); });
 }
-function buildWhatsAppMessage(order, extra={}){
+function buildWhatsAppMessage(order){
   const lines=[];
   lines.push(`🧾 *Pedido ${CONFIG.appName}*`);
   lines.push(`ID: *${order.id}*`,"");
@@ -421,17 +430,13 @@ function buildWhatsAppMessage(order, extra={}){
   lines.push(`Nombre: ${order.shipping.fullName}`,`Cédula: ${order.shipping.cedula}`,`Teléfono: ${order.shipping.phone}`,`Ciudad: ${order.shipping.city}`,`Dirección: ${order.shipping.address}`);
   if(order.shipping.reference) lines.push(`Referencia: ${order.shipping.reference}`);
   lines.push("","💳 *Pago por transferencia/depósito*");
-  if(extra?.proofUrl){
-    lines.push(`Comprobante (link): ${extra.proofUrl}`);
-  }else{
-    lines.push("Comprobante: guardado en el sistema.");
-  }
-  return lines.join("\n");
+  if(order.proofUrl){ lines.push(`Comprobante: ${order.proofUrl}`); }
+  else{ lines.push("Comprobante: (subido en el sistema)"); }
+  return encodeURIComponent(lines.join("\n"));
 }
 function openWhatsApp(order){
   const e164=toWhatsAppE164(CONFIG.whatsapp);
-  const msg = buildWhatsAppMessage(order);
-  window.open(`https://wa.me/${e164}?text=${encodeURIComponent(msg)}`,"_blank");
+  window.open(`https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`,"_blank","noopener,noreferrer");
 }
 
 function renderCart(){
@@ -460,110 +465,99 @@ function renderCart(){
 }
 
 $("btnPlaceOrder").addEventListener("click", async ()=>{
-  // En iPhone/Safari, abrir una ventana y luego redirigir suele terminar en about:blank.
-  // Hacemos: crear pedido -> intentar abrir WhatsApp en la MISMA pestaña.
-  // Si el navegador lo bloquea, dejamos un botón manual (tap directo) para enviarlo.
+  const btn = $("btnPlaceOrder");
+  const prevTxt = btn?.textContent;
+  if(btn){ btn.disabled = true; btn.textContent = "Procesando…"; }
 
-  const shipping=getShipping();
-  if(!shipping){ openModal("modalReg"); return; }
-
-  const cart=getCart();
-  const enriched=enrichCart(cart);
-  if(!enriched.length){ alert("Carrito vacío."); return; }
-
-  for(const {ci,p} of enriched){
-    if((p.stock||0) < (ci.qty||0)){ alert(`Stock insuficiente para: ${p.title}`); return; }
-  }
-
-  // Requerir comprobante para poder crear el pedido
-  const file=$("proof").files?.[0]||null;
-  if(!file){
-    alert("Adjunta el comprobante de pago antes de realizar el pedido.");
-    return;
-  }
-
-  const subtotal=enriched.reduce((s,x)=>s+(Number(x.p.price||0)*x.ci.qty),0);
-  const ship=Math.max(0,Number($("shippingCost").value||0));
-  const totalFinal=ship>0?subtotal+ship:null;
-  const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(totalFinal??subtotal);
-
-  const created = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
-  const orderId = created?.orderId || null;
-  const proofUrl = created?.proofUrl || null;
-  if(!orderId){
-    const msg = LAST_ORDER_ERROR
-      ? `No se pudo crear el pedido. (${LAST_ORDER_ERROR})`
-      : "No se pudo crear el pedido.";
-    alert(msg);
-    return;
-  }
-
-  const order={
-    id: orderId,
-    createdAt: Date.now(),
-    shipping,
-    items: enriched.map(({ci,p})=>({ title:p.title, price:Number(p.price||0), qty:ci.qty })),
-    subtotal,
-    shippingCost: ship>0?ship:null,
-    totalDueNow: due,
-    totalFinal,
-  };
-
-  // Intento automático: abrir WhatsApp en la MISMA pestaña.
-  // Nota: WhatsApp por link NO puede adjuntar imágenes automáticamente.
-  // Solución práctica: guardamos el comprobante en Firebase y mandamos el LINK en el mensaje.
-  let waUrl = "";
   try{
-    const e164=toWhatsAppE164(CONFIG.whatsapp || "0983706294");
-    const msg = buildWhatsAppMessage(order, { proofUrl });
-    waUrl = `https://wa.me/${e164}?text=${encodeURIComponent(msg)}`;
-    window.location.href = waUrl;
-  }catch(e){
-    console.warn(e);
-  }
+    const shipping=getShipping();
+    if(!shipping){ openModal("modalReg"); return; }
 
-  // Limpiar UI
-  $("proof").value = "";
-  bindProofInput();
-  setCart([]); updateCartBadge(); renderCart();
+    const cart=getCart();
+    const enriched=enrichCart(cart);
+    if(!enriched.length){ alert("Carrito vacío."); return; }
 
-  // Mostrar confirmación + botón manual (por si el navegador bloqueó WhatsApp)
-  const resBox = $("orderResult");
-  const resTxt = $("orderResultText");
-  const btn = $("btnSendWhats");
-  if(resTxt) resTxt.textContent = `ID: ${order.id} • Total: ${formatMoney(due)} • Comprobante guardado ✅`;
-  if(btn){
-    if(waUrl){
-      btn.style.display = "inline-flex";
-      btn.onclick = ()=>{ window.location.href = waUrl; };
-    }else{
-      btn.style.display = "none";
+    for(const {ci,p} of enriched){
+      if((p.stock||0) < (ci.qty||0)){
+        alert(`Stock insuficiente para: ${p.title}`);
+        return;
+      }
     }
-  }
-  if(resBox) resBox.style.display = "block";
 
-  // Seguir comprando
-  const btnNew = $("btnNewOrder");
-  if(btnNew){
-    btnNew.onclick = ()=>{
-      if(resBox) resBox.style.display = "none";
-      try{ window.scrollTo({ top:0, behavior:"smooth" }); }catch(_){ }
+    const file=$("proof").files?.[0]||null;
+    if(!file){
+      alert("Adjunta el comprobante de pago antes de realizar el pedido.");
+      return;
+    }
+
+    const subtotal=enriched.reduce((s,x)=>s+(Number(x.p.price||0)*x.ci.qty),0);
+    const ship=Math.max(0,Number($("shippingCost").value||0));
+    const totalFinal=ship>0?subtotal+ship:null;
+    const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(totalFinal??subtotal);
+
+    const created = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
+    const orderId = typeof created === "string" ? created : created?.orderId;
+    const proofUrl = (typeof created === "object" && created) ? (created.proofUrl||null) : null;
+
+    if(!orderId){
+      const msg = LAST_ORDER_ERROR
+        ? `No se pudo crear el pedido. (${LAST_ORDER_ERROR})`
+        : "No se pudo crear el pedido.";
+      alert(msg);
+      return;
+    }
+
+    const order={
+      id: orderId,
+      createdAt: Date.now(),
+      shipping,
+      items: enriched.map(({ci,p})=>({ title:p.title, price:Number(p.price||0), qty:ci.qty })),
+      subtotal,
+      shippingCost: ship>0?ship:null,
+      totalDueNow: due,
+      totalFinal,
+      proofUrl,
     };
+
+    // Mostrar confirmación + botón de WhatsApp (fallback iPhone/WebView)
+    const e164=toWhatsAppE164(CONFIG.whatsapp || "0983706294");
+    const waUrl = `https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`;
+
+    const resBox = $("orderResult");
+    const resTxt = $("orderResultText");
+    const waBtn = $("btnSendWhats");
+    if(resTxt) resTxt.textContent = `ID: ${order.id} • Total: ${formatMoney(due)} • Comprobante ✅`;
+    LAST_WA_URL = waUrl; if(waBtn){ waBtn.style.display = "inline-flex"; }
+    if(resBox) resBox.style.display = "block";
+
+    // Intento de abrir WhatsApp (misma pestaña evita about:blank en iPhone)
+    try{
+      window.location.href = waUrl;
+    }catch(e){
+      console.warn(e);
+      // si falla, el botón queda para tocarlo manual
+    }
+
+    // Guardado silencioso: limpiamos carrito y comprobante
+    $("proof").value = "";
+    bindProofInput();
+    setCart([]); updateCartBadge(); renderCart();
+
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = prevTxt || "Realizar pedido"; }
   }
 });
+);
 
 
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m])); }
 
 async function initLiveFirebase(){
   bindProofInput();
-  // Botón visible para adjuntar comprobante
-  const pickBtn = $("btnProofPick");
-  const proofInp = $("proof");
-  const proofLbl = $("proofName");
-  const pick = ()=>{ try{ proofInp?.click(); }catch(_){ } };
-  if(pickBtn) pickBtn.addEventListener("click", pick);
-  if(proofLbl) proofLbl.addEventListener("click", pick);
+  const btnSend = $("btnSendWhats");
+  const btnNew = $("btnNewOrder");
+  if(btnSend) btnSend.addEventListener("click", ()=>{ if(LAST_WA_URL) window.location.href = LAST_WA_URL; });
+  if(btnNew) btnNew.addEventListener("click", ()=>{ try{ closeModal("modalCart"); }catch(_){ } });
   // Evita que “productos demo” guardados en el navegador se mezclen con Firestore.
   try{ localStorage.removeItem(K.products); }catch(e){}
   // Productos (stock global)
@@ -643,10 +637,11 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
     const ship = Number(shippingCost||0);
     const total = subtotal + ship;
-    const payNow = Math.round((total*0.5)*100)/100;
+    // Mantener coherencia con CONFIG.paymentMode y lo que el cliente ve en pantalla.
+    const payNow = (CONFIG.paymentMode === "deposit50")
+      ? Math.round((subtotal*0.5)*100)/100
+      : Math.round((total)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
-
-    let proofUrlReturn = null;
 
     // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
@@ -657,6 +652,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       shippingCost: ship,
       total,
       payNow,
+      paymentMode: CONFIG.paymentMode || "full",
       status: proofFile ? "recibo_subido" : "nuevo",
       trackingNumber: "",
       pointsEarned,
@@ -664,6 +660,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       updatedAt: fb.serverTimestamp(),
     });
     const orderId = orderRef.id;
+    let proofUrl = null;
 
     // A PARTIR DE AQUÍ: todo es "best effort".
     // Si algo falla (Storage, stock, cliente), igual devolvemos el orderId.
@@ -675,8 +672,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         const path = `orders/${u.uid}/${orderId}/${safeName}`;
         const r = fb.ref(storage, path);
         await fb.uploadBytes(r, proofFile);
-        const proofUrl = await fb.getDownloadURL(r);
-        proofUrlReturn = proofUrl;
+        proofUrl = await fb.getDownloadURL(r);
         await fb.updateDoc(fb.doc(db, "orders", orderId), {
           proofUrl,
           proofName: safeName,
@@ -731,7 +727,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { postProcessError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
     }
 
-    return { orderId, proofUrl: proofUrlReturn };
+    return { orderId, proofUrl };
   }catch(e){
     console.warn("Order create failed:", e);
     // Guardamos el error real para mostrarlo
