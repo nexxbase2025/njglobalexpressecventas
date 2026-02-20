@@ -9,7 +9,7 @@ const escapeHtml = (s)=>String(s??"")
   .replaceAll('"',"&quot;")
   .replaceAll("'","&#039;");
 
-function show(id){ const el=$(id); if(el) el.style.display=""; }
+function show(id){ const el=$(id); if(!el) return; el.style.display = (el.classList && el.classList.contains("modal")) ? "flex" : ""; }
 function hide(id){ const el=$(id); if(el) el.style.display="none"; }
 
 function setActiveTab(tab){
@@ -249,24 +249,6 @@ $("btnAddProduct").addEventListener("click", ()=>{
   $("pmId").value="";
 });
 
-// Eliminar todos los productos (limpieza total)
-$("btnDeleteAllProducts").addEventListener("click", async ()=>{
-  if(!confirm("¿Eliminar TODOS los productos?")) return;
-  if(!confirm("Confirmación final: esto no se puede deshacer.")) return;
-  try{
-    const q = fb.query(fb.collection(db,"products"), fb.limit(500));
-    const snap = await fb.getDocs(q);
-    const dels = [];
-    snap.forEach(d=>dels.push(fb.deleteDoc(fb.doc(db,"products", d.id))));
-    await Promise.all(dels);
-    await loadProducts();
-    alert("Productos eliminados ✅");
-  }catch(e){
-    console.warn(e);
-    alert("No se pudo eliminar todo.");
-  }
-});
-
 $("pmClose").addEventListener("click", ()=>hide("productModal"));
 
 $("pmSave").addEventListener("click", async ()=>{
@@ -340,15 +322,8 @@ async function loadProducts(){
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
 
-    // Mostrar solo activos (si no existe "active", se asume activo)
-    const visible = items.filter(p => (p.active === undefined ? true : !!p.active));
-
-    wrap.innerHTML = visible.length ? visible.map(p=>{
-      const meta = [
-        p.brand ? `Marca: ${p.brand}` : "",
-        p.category ? `Categoría: ${p.category}` : "",
-        p.sub ? `Tipo: ${p.sub}` : ""
-      ].filter(Boolean).join(" • ");
+    wrap.innerHTML = items.length ? items.map(p=>{
+      const meta = [p.brand, p.category, p.sub].filter(Boolean).join(" • ");
       const size = p.sizeLabel && p.sizeValue ? `${p.sizeLabel}: ${p.sizeValue}` : (p.sizeValue?`${p.sizeValue}`:"");
       const cm = p.cm ? ` • cm: ${escapeHtml(p.cm)}` : "";
       return `
@@ -372,7 +347,7 @@ async function loadProducts(){
     wrap.querySelectorAll("[data-edit]").forEach(btn=>{
       btn.addEventListener("click", ()=>{
         const id = btn.getAttribute("data-edit");
-        const p = visible.find(x=>x.id===id);
+        const p = items.find(x=>x.id===id);
         if(!p) return;
         show("productModal");
         $("pmId").value = p.id;
@@ -395,7 +370,7 @@ async function loadProducts(){
         const id = btn.getAttribute("data-del");
         if(!confirm("¿Eliminar este producto?")) return;
         try{
-          await fb.deleteDoc(fb.doc(db,"products",id));
+          await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
           await loadProducts();
         }catch(e){
           console.warn(e);
