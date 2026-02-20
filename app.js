@@ -1,6 +1,7 @@
 import { CONFIG } from "./config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 
+let LAST_ORDER_ERROR = null;
 const K = { shipping:"njge_shipping", cart:"njge_cart", orders:"njge_orders", products:"njge_products" };
 const $ = (id)=>document.getElementById(id);
 
@@ -58,7 +59,7 @@ function getProducts(){
   if(FB_PRODUCTS_CACHE) return FB_PRODUCTS_CACHE;
   const stored=getJSON(K.products,null);
   const list=(stored&&stored.length)?stored:[];
-  return list.map(normalizeProduct);
+  return list.filter(p=>p && p.active!==false).map(normalizeProduct);
 }
 function setProducts(p){ setJSON(K.products,p); }
 
@@ -468,7 +469,9 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
   const file=$("proof").files?.[0]||null;
   const orderId = await createOrderInFirestore({ shipping, cart, shippingCost: ship, proofFile: file });
   if(!orderId){
-    alert("No se pudo crear el pedido. Revisa tu conexión e intenta otra vez.");
+    alert(`No se pudo crear el pedido.
+${(LAST_ORDER_ERROR && (LAST_ORDER_ERROR.code||LAST_ORDER_ERROR.name))?`Error: ${(LAST_ORDER_ERROR.code||LAST_ORDER_ERROR.name)}
+`:``}${LAST_ORDER_ERROR? (LAST_ORDER_ERROR.message||String(LAST_ORDER_ERROR)) : "Revisa tu conexión e intenta otra vez."}`);
     return;
   }
 
@@ -554,13 +557,13 @@ async function upsertCustomerProfile(profile){
 }
 
 async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile }){
-  // Creamos el pedido primero y devolvemos el ID si ese paso se logró.
-  // Si falla la subida del comprobante o la transacción de stock/cliente, NO bloqueamos el pedido.
   let orderId = null;
+  LAST_ORDER_ERROR = null;
   try{
     const u = await ensureAnon();
     if(!u) throw new Error("anon-auth-failed");
 
+    // Recalcular con precios actuales
     const products = getProducts();
     const items = cart.map(c=>{
       const p = products.find(x=>x.id===c.id) || { title:c.title, price:c.price };
@@ -573,14 +576,13 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         sub: p.sub||c.sub||"",
       };
     });
-
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
     const ship = Number(shippingCost||0);
     const total = subtotal + ship;
     const payNow = Math.round((total*0.5)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
 
-    // 1) Crear el pedido
+    // 1) Crear pedido (SI esto falla, no hay nada que hacer)
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
       customerUid: u.uid,
       shipping,
@@ -592,15 +594,12 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       status: proofFile ? "recibo_pendiente" : "nuevo",
       trackingNumber: "",
       pointsEarned,
-      proofUrl: "",
-      proofName: "",
       createdAt: fb.serverTimestamp(),
       updatedAt: fb.serverTimestamp(),
-      warnings: [],
     });
     orderId = orderRef.id;
 
-    // 2) Subir comprobante (opcional) — si falla, warning y seguimos
+    // 2) Subir comprobante (NO debe bloquear la creación del pedido)
     if(proofFile){
       try{
         const safeName = (proofFile.name||"pago.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
@@ -616,17 +615,18 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         });
       }catch(e){
         console.warn("Proof upload failed:", e);
+        // Guardamos info en el pedido, pero NO fallamos la compra
         try{
-          await fb.updateDoc(fb.doc(db, "orders", orderId), {
+          await fb.updateDoc(fb.doc(db,"orders",orderId), {
             status: "recibo_error",
-            warnings: fb.arrayUnion("proof_upload_failed"),
+            proofError: (e && (e.code || e.message)) ? String(e.code||e.message) : "proof-upload-failed",
             updatedAt: fb.serverTimestamp(),
           });
         }catch(_){}
       }
     }
 
-    // 3) Stock + cliente (opcional) — si falla, NO bloquea
+    // 3) Descontar stock + actualizar cliente (NO debe bloquear el pedido)
     try{
       await fb.runTransaction(db, async (tx)=>{
         for(const it of items){
@@ -661,10 +661,10 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         }, { merge:true });
       });
     }catch(e){
-      console.warn("Transaction failed:", e);
+      console.warn("Post-order transaction failed:", e);
       try{
-        await fb.updateDoc(fb.doc(db, "orders", orderId), {
-          warnings: fb.arrayUnion("stock_or_customer_tx_failed"),
+        await fb.updateDoc(fb.doc(db,"orders",orderId), {
+          postProcessError: (e && (e.code || e.message)) ? String(e.code||e.message) : "post-process-failed",
           updatedAt: fb.serverTimestamp(),
         });
       }catch(_){}
@@ -673,7 +673,9 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     return orderId;
   }catch(e){
     console.warn("Order create failed:", e);
-    return orderId; // si se alcanzó a crear, devolvemos el ID igual
+    LAST_ORDER_ERROR = e;
+    // Si el pedido ya se creó, devolvemos el ID igual
+    return orderId;
   }
 }
 

@@ -9,7 +9,7 @@ const escapeHtml = (s)=>String(s??"")
   .replaceAll('"',"&quot;")
   .replaceAll("'","&#039;");
 
-function show(id){ const el=$(id); if(!el) return; el.style.display = el.classList.contains("modal") ? "flex" : ""; }
+function show(id){ const el=$(id); if(!el) return; if(el.classList && el.classList.contains("modal")){ el.style.display="flex"; } else { el.style.display=""; } }
 function hide(id){ const el=$(id); if(el) el.style.display="none"; }
 
 function setActiveTab(tab){
@@ -25,7 +25,7 @@ function money(n){
   return `$${v.toFixed(2)}`;
 }
 
-async function requireAdmin(){
+async async function requireAdmin(){
   const u = auth.currentUser;
   if(!u) return false;
 
@@ -108,8 +108,9 @@ async function loadClientes(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
+    const visible = items.filter(p=>p.active!==false);
 
-    wrap.innerHTML = visible.length ? items.map(c=>{
+    wrap.innerHTML = visible.length ? visible.map(p=> items.map(c=>{
       const name = c.fullName || "(sin nombre)";
       const pts = Number(c.points||0);
       const spent = Number(c.totalSpent||0);
@@ -321,7 +322,6 @@ async function loadProducts(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
-    const visible = items.filter(p=>p.active!==false);
 
     wrap.innerHTML = visible.length ? visible.map(p=>{
       const meta = [p.brand, p.category, p.sub].filter(Boolean).join(" • ");
@@ -348,7 +348,7 @@ async function loadProducts(){
     wrap.querySelectorAll("[data-edit]").forEach(btn=>{
       btn.addEventListener("click", ()=>{
         const id = btn.getAttribute("data-edit");
-        const p = items.find(x=>x.id===id);
+        const p = visible.find(x=>x.id===id);
         if(!p) return;
         show("productModal");
         $("pmId").value = p.id;
@@ -371,11 +371,11 @@ async function loadProducts(){
         const id = btn.getAttribute("data-del");
         if(!confirm("¿Eliminar este producto?")) return;
         try{
-          await fb.deleteDoc(fb.doc(db,"products",id));
+          await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
           await loadProducts();
         }catch(e){
           console.warn(e);
-          alert("No se pudo eliminar.");
+          alert(`No se pudo eliminar. (${e.code||"error"}): ${e.message||e}`);
         }
       });
     });

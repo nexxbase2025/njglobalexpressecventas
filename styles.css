@@ -30,7 +30,7 @@ button{font-family:inherit;}
 }
 .logo{
   width:42px; height:42px; border-radius:12px; overflow:hidden;
-  background: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.12);
   flex:0 0 auto;
   border:1px solid rgba(255,255,255,.10);
 }
@@ -54,7 +54,7 @@ button{font-family:inherit;}
 .actions{margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;}
 .btn{
   border:1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.12);
   color: white;
   padding:8px 10px;
   border-radius:12px;
@@ -70,7 +70,7 @@ button{font-family:inherit;}
   width:36px; height:36px;
   border-radius:12px;
   border:1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.12);
   display:grid; place-items:center;
   cursor:pointer;
 }
@@ -98,7 +98,7 @@ button{font-family:inherit;}
   padding:9px 12px;
   border-radius:999px;
   border:1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.12);
   font-weight:980; font-size:12px;
   cursor:pointer;
   transition: background .15s ease, transform .15s ease, border-color .15s ease;
@@ -203,7 +203,7 @@ grid-template-columns:repeat(3, minmax(0,1fr));} }
   padding:10px 12px;
   border-radius:12px;
   border:1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.12);
   color:white;
   outline:none;
   font-size:13px;
@@ -234,7 +234,7 @@ grid-template-columns:repeat(3, minmax(0,1fr));} }
   background: rgba(255,255,255,.04);
 }
 .item img{width:56px; height:56px; border-radius:14px; object-fit:cover;}
-.qtybtn{width:32px; height:32px; border-radius:10px; border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color:white; font-weight:980; cursor:pointer;}
+.qtybtn{width:32px; height:32px; border-radius:10px; border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.12); color:white; font-weight:980; cursor:pointer;}
 .trash{border:none; background:transparent; color:rgba(255,255,255,.75); cursor:pointer;}
 .panel{
   margin-top:12px;
@@ -279,7 +279,7 @@ grid-template-columns:repeat(3, minmax(0,1fr));} }
   padding:10px 8px;
   border-radius:14px;
   border:1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.12);
   color:white;
   font-weight:950;
   font-size:12px;
