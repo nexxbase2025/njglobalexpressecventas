@@ -48,7 +48,7 @@ function bindProofInput(){
   if(!inp || !label) return;
   const update = ()=>{
     const f = inp.files?.[0];
-    label.textContent = f ? f.name : "Comprobante de pago: ningún archivo";
+    label.textContent = f ? f.name : "Comprobante: ningún archivo";
   };
   inp.addEventListener("change", update);
   update();
@@ -573,8 +573,11 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     });
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
     const ship = Number(shippingCost||0);
+    // Total “final” siempre incluye envío si el usuario lo puso. Si no, el envío se confirma por WhatsApp.
     const total = subtotal + ship;
-    const payNow = Math.round((total*0.5)*100)/100;
+    const payNow = CONFIG.paymentMode === "deposit50"
+      ? Math.round((subtotal*0.5)*100)/100
+      : Math.round((total)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
 
     // Crear el pedido primero para tener ID
@@ -594,56 +597,69 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     });
     const orderId = orderRef.id;
 
-    // Subir comprobante (si existe)
-    let proofUrl = "";
+    // Subir comprobante (si existe). Si falla Storage, NO tumbamos el pedido.
     if(proofFile){
-      const safeName = (proofFile.name||"pago.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
-      const path = `orders/${u.uid}/${orderId}/${safeName}`;
-      const r = fb.ref(storage, path);
-      await fb.uploadBytes(r, proofFile);
-      proofUrl = await fb.getDownloadURL(r);
-      await fb.updateDoc(fb.doc(db, "orders", orderId), {
-        proofUrl,
-        proofName: safeName,
-        updatedAt: fb.serverTimestamp(),
-      });
+      try{
+        const safeName = (proofFile.name||"pago.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
+        const path = `orders/${u.uid}/${orderId}/${safeName}`;
+        const r = fb.ref(storage, path);
+        await fb.uploadBytes(r, proofFile);
+        const proofUrl = await fb.getDownloadURL(r);
+        await fb.updateDoc(fb.doc(db, "orders", orderId), {
+          proofUrl,
+          proofName: safeName,
+          status: "recibo_subido",
+          updatedAt: fb.serverTimestamp(),
+        });
+      }catch(err){
+        console.warn("Proof upload failed (order kept):", err);
+        await fb.updateDoc(fb.doc(db, "orders", orderId), {
+          status: "nuevo",
+          proofUploadError: true,
+          updatedAt: fb.serverTimestamp(),
+        }).catch(()=>{});
+      }
     }
 
-    // Descontar stock + actualizar cliente (transacción)
-    await fb.runTransaction(db, async (tx)=>{
-      // stock
-      for(const it of items){
-        const pref = fb.doc(db, "products", it.id);
-        const snap = await tx.get(pref);
-        if(!snap.exists()) continue;
-        const cur = snap.data().stock ?? 0;
-        const next = Math.max(0, Number(cur) - Number(it.qty||1));
-        tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
-      }
-      // cliente
-      const cref = fb.doc(db, "customers", u.uid);
-      const csnap = await tx.get(cref);
-      const prev = csnap.exists() ? csnap.data() : {};
-      const prevPoints = Number(prev.points||0);
-      const prevSpent = Number(prev.totalSpent||0);
-      const prevCount = Number(prev.ordersCount||0);
-      tx.set(cref, {
-        uid: u.uid,
-        fullName: shipping.fullName,
-        cedula: shipping.cedula,
-        phone: shipping.phone,
-        city: shipping.city,
-        address: shipping.address,
-        reference: shipping.reference||"",
-        points: prevPoints + pointsEarned,
-        totalSpent: Math.round((prevSpent + subtotal)*100)/100,
-        ordersCount: prevCount + 1,
-        lastOrderId: orderId,
-        lastOrderAt: fb.serverTimestamp(),
-        updatedAt: fb.serverTimestamp(),
-        createdAt: prev.createdAt || fb.serverTimestamp(),
-      }, { merge:true });
-    });
+    // Descontar stock + actualizar cliente (transacción). Si falla por reglas, NO tumbamos el pedido.
+    try{
+      await fb.runTransaction(db, async (tx)=>{
+        // stock
+        for(const it of items){
+          const pref = fb.doc(db, "products", it.id);
+          const snap = await tx.get(pref);
+          if(!snap.exists()) continue;
+          const cur = snap.data().stock ?? 0;
+          const next = Math.max(0, Number(cur) - Number(it.qty||1));
+          tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
+        }
+        // cliente
+        const cref = fb.doc(db, "customers", u.uid);
+        const csnap = await tx.get(cref);
+        const prev = csnap.exists() ? csnap.data() : {};
+        const prevPoints = Number(prev.points||0);
+        const prevSpent = Number(prev.totalSpent||0);
+        const prevCount = Number(prev.ordersCount||0);
+        tx.set(cref, {
+          uid: u.uid,
+          fullName: shipping.fullName,
+          cedula: shipping.cedula,
+          phone: shipping.phone,
+          city: shipping.city,
+          address: shipping.address,
+          reference: shipping.reference||"",
+          points: prevPoints + pointsEarned,
+          totalSpent: Math.round((prevSpent + subtotal)*100)/100,
+          ordersCount: prevCount + 1,
+          lastOrderId: orderId,
+          lastOrderAt: fb.serverTimestamp(),
+          updatedAt: fb.serverTimestamp(),
+          createdAt: prev.createdAt || fb.serverTimestamp(),
+        }, { merge:true });
+      });
+    }catch(err){
+      console.warn("Post-order transaction failed (order kept):", err);
+    }
 
     return orderId;
   }catch(e){

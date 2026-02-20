@@ -46,7 +46,10 @@
       <section class="panel" id="panelAgregar" style="display:none;">
         <div class="row">
           <div style="font-weight:980; font-size:16px;">Productos</div>
-          <button class="btn aqua" id="btnAddProduct">+ Agregar</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+            <button class="btn" id="btnDeleteAllProducts">Eliminar todo</button>
+            <button class="btn aqua" id="btnAddProduct">+ Agregar</button>
+          </div>
         </div>
         <div id="adminProducts" class="cartlist" style="margin-top:10px;"></div>
       </section>
@@ -55,7 +58,7 @@
 
   <script type="module" src="admin.js"></script>
 
-  <div class="modal" id="firebaseLogin" style="display:none;">
+  <div class="modal" id="firebaseLogin" style="display:flex;">
     <div class="panel" style="max-width:420px;">
       <div style="font-weight:980; font-size:16px;">Entrar Admin</div>
       <div class="small" style="margin-top:6px;">Inicia sesión para administrar productos y ver ventas.</div>
@@ -78,9 +81,9 @@
       <input type="hidden" id="pmImageUrl" />
 
       <div style="margin-top:10px; display:grid; gap:10px;">
-        <input class="input" id="pmTitle" placeholder="Título (Ej: Nike Air)" />
+        <input class="input" id="pmTitle" placeholder="Nombre / modelo (Ej: Air Force 1)" />
         <div class="row" style="gap:10px;">
-          <input class="input" id="pmBrand" placeholder="Marca (Ej: Nike)" />
+          <input class="input" id="pmBrand" placeholder="Marca (Ej: Nike / Adidas)" />
           <select class="input" id="pmCategory">
             <option>Ropa</option>
             <option>Calzado</option>
@@ -88,7 +91,7 @@
             <option>Electrónica</option>
           </select>
         </div>
-        <input class="input" id="pmSub" placeholder="Tipo (Ej: Caballero / Dama / Niños / Todos)" />
+        <input class="input" id="pmSub" placeholder="Tipo / público (Ej: Dama / Caballero / Niño / Unisex)" />
         <div class="row" style="gap:10px;">
           <input class="input" id="pmPrice" type="number" step="0.01" placeholder="Precio" />
           <input class="input" id="pmStock" type="number" step="1" placeholder="Stock" />

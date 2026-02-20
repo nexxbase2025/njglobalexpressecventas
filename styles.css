@@ -243,6 +243,15 @@ grid-template-columns:repeat(3, minmax(0,1fr));} }
   border:1px solid rgba(255,255,255,.12);
   background: rgba(255,255,255,.04);
 }
+
+/* En modales (admin / login), menos “efecto vidrio” para que se lean bien los campos */
+.modal .panel{
+  background: rgba(15,22,44,.96);
+  box-shadow: var(--shadow);
+}
+.modal .input{
+  background: rgba(255,255,255,.10);
+}
 .hr{height:1px; background: rgba(255,255,255,.10); margin:10px 0;}
 .toast{
   position:fixed; left:12px; right:12px; bottom:86px; z-index:75;
