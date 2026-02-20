@@ -199,7 +199,7 @@ function buildSubPills(){
 function filterProducts(all){
   return all.filter(p=>{
     if(activeCat!=="all" && (p.category||"")!==activeCat) return false;
-    if(activeSub && (p.subcategory||"")!==activeSub) return false;
+    if(activeSub && (p.subcategory||p.sub||"")!==activeSub) return false;
     return true;
   });
 }
@@ -239,7 +239,7 @@ function cardHTML(p){
     </div>
     <div class="body">
       <div class="title">${escapeHtml(p.title)}</div>
-      <div class="meta"><b>${escapeHtml(p.brand||"")}</b>${p.category?` • ${escapeHtml(labelCat(p.category))}`:""}${p.subcategory?` • ${escapeHtml(p.subcategory)}`:""}<br/>${getVariantMeta(p)}</div>
+      <div class="meta"><b>${escapeHtml(p.brand||"")}</b>${p.category?` • ${escapeHtml(labelCat(p.category))}`:""}${(p.subcategory||p.sub)?` • ${escapeHtml(p.subcategory||p.sub)}`:""}<br/>${getVariantMeta(p)}</div>
       <button class="btn primary add" data-add="${p.id}" ${soldOut?"disabled":""}>${soldOut?"No disponible":"Agregar"}</button>
     </div>
   </article>`;

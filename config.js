@@ -31,10 +31,10 @@ categoryColors: {
 
 categories: [
 
-    { id: "ropa", label: "Ropa", subs: ["Dama", "Caballero", "Niños"] },
-    { id: "calzado", label: "Calzado", subs: ["Dama", "Caballero", "Niños"] },
-    { id: "bisuteria", label: "Bisutería", subs: ["Dama", "Caballero", "Niños"] },
-    { id: "electronica", label: "Electrónica", subs: [] },
+    { id: "ropa", label: "Ropa", subs: ["Dama", "Caballero", "Niños", "Otros"] },
+    { id: "calzado", label: "Calzado", subs: ["Dama", "Caballero", "Niños", "Otros"] },
+    { id: "bisuteria", label: "Perfumería", subs: ["Dama", "Caballero", "Niños", "Otros"] },
+    { id: "electronica", label: "Electrónica", subs: ["Dama", "Caballero", "Niños", "Otros"] },
   ],
 
   featuredRotationMs: 6500,

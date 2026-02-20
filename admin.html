@@ -82,13 +82,19 @@
         <div class="row" style="gap:10px;">
           <input class="input" id="pmBrand" placeholder="Marca (Ej: Nike)" />
           <select class="input" id="pmCategory">
-            <option>Ropa</option>
-            <option>Calzado</option>
-            <option>Bisutería</option>
-            <option>Electrónica</option>
+            <option value="ropa">Ropa</option>
+            <option value="calzado">Calzado</option>
+            <option value="bisuteria">Perfumería</option>
+            <option value="electronica">Electrónica</option>
           </select>
         </div>
-        <input class="input" id="pmSub" placeholder="Tipo (Ej: Caballero / Dama / Niños / Todos)" />
+        <select class="input" id="pmSub">
+          <option value="" selected>Tipo (elige)</option>
+          <option value="Caballero">Caballero</option>
+          <option value="Dama">Dama</option>
+          <option value="Niños">Niños</option>
+          <option value="Otros">Otros</option>
+        </select>
         <div class="row" style="gap:10px;">
           <input class="input" id="pmPrice" type="number" step="0.01" placeholder="Precio" />
           <input class="input" id="pmStock" type="number" step="1" placeholder="Stock" />

@@ -1,9 +1,7 @@
 import { CONFIG } from "./config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
-import { ADMIN_UID } from "./firebase-config.js";
 
 const $ = (id)=>document.getElementById(id);
-const on = (id, evt, fn)=>{ const el=$(id); if(el) el.addEventListener(evt, fn); };
 const escapeHtml = (s)=>String(s??"")
   .replaceAll("&","&amp;")
   .replaceAll("<","&lt;")
@@ -38,8 +36,7 @@ async function requireAdmin(){
   if(!u) return false;
 
   // Admin por UID (más seguro). Si no coincide, volvemos a mostrar login SIEMPRE.
-  const allowedUid = (CONFIG.adminUid || ADMIN_UID || "").trim();
-  if(allowedUid && u.uid !== allowedUid){
+  if(CONFIG.adminUid && u.uid !== CONFIG.adminUid){
     try{ alert("Esta cuenta no es admin de esta tienda."); }catch(_){}
     // Mostrar login de inmediato (evita pantalla en blanco si signOut demora/falla)
     show("firebaseLogin");
@@ -52,7 +49,7 @@ async function requireAdmin(){
 }
 
 // ---------------------- FIREBASE LOGIN ----------------------
-on("loginFirebase","click", async ()=>{
+$("loginFirebase").addEventListener("click", async ()=>{
   const email = $("fbEmail").value.trim();
   const pass = $("fbPass").value;
   try{
@@ -70,7 +67,7 @@ on("loginFirebase","click", async ()=>{
   }
 });
 
-on("logoutFirebase","click", async ()=>{
+$("logoutFirebase").addEventListener("click", async ()=>{
   await fb.signOut(auth);
   show("firebaseLogin");
   hide("adminArea");
@@ -93,16 +90,16 @@ fb.onAuthStateChanged(auth, async (u)=>{
   await Promise.all([loadOrders(), loadProducts(), loadClientes()]);
 });
 
-on("fbPass","keydown", (e)=>{ if(e.key==="Enter") $("loginFirebase").click(); });
-on("fbEmail","keydown", (e)=>{ if(e.key==="Enter") $("loginFirebase").click(); });
+$("fbPass").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("loginFirebase").click(); });
+$("fbEmail").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("loginFirebase").click(); });
 
 // ---------------------- TABS ----------------------
-on("tabClientes","click", ()=>{ setActiveTab("clientes"); loadClientes(); });
-on("tabPedidos","click", ()=>{ setActiveTab("pedidos"); loadOrders(); });
-on("tabAgregar","click", ()=>{ setActiveTab("agregar"); loadProducts(); });
+$("tabClientes").addEventListener("click", ()=>{ setActiveTab("clientes"); loadClientes(); });
+$("tabPedidos").addEventListener("click", ()=>{ setActiveTab("pedidos"); loadOrders(); });
+$("tabAgregar").addEventListener("click", ()=>{ setActiveTab("agregar"); loadProducts(); });
 
-on("btnRefreshOrders","click", loadOrders);
-on("btnRefreshClientes","click", loadClientes);
+$("btnRefreshOrders").addEventListener("click", loadOrders);
+$("btnRefreshClientes").addEventListener("click", loadClientes);
 
 // ---------------------- CLIENTES ----------------------
 async function loadClientes(){
@@ -243,13 +240,13 @@ function renderOrders(orders){
 }
 
 // ---------------------- PRODUCTOS ----------------------
-on("btnAddProduct","click", ()=>{
+$("btnAddProduct").addEventListener("click", ()=>{
   show("productModal");
   $("pmTitle").value="";
   $("pmBrand").value="";
   $("pmPrice").value="";
   $("pmStock").value="";
-  $("pmCategory").value="Ropa";
+  $("pmCategory").value="ropa";
   $("pmSub").value="";
   $("pmSizeLabel").value="";
   $("pmSizeValue").value="";
@@ -258,9 +255,9 @@ on("btnAddProduct","click", ()=>{
   $("pmId").value="";
 });
 
-on("pmClose","click", ()=>hide("productModal"));
+$("pmClose").addEventListener("click", ()=>hide("productModal"));
 
-on("pmSave","click", async ()=>{
+$("pmSave").addEventListener("click", async ()=>{
   const id = $("pmId").value.trim();
   const title = $("pmTitle").value.trim();
   const brand = $("pmBrand").value.trim();
@@ -292,6 +289,7 @@ on("pmSave","click", async ()=>{
       title,
       brand,
       category,
+      subcategory: sub,
       sub,
       price,
       stock,
@@ -402,14 +400,6 @@ async function loadProducts(){
 }
 
 // ---------------------- INIT UI ----------------------
-function initUI(){
-  hide("adminArea");
-  show("firebaseLogin");
-  setActiveTab("pedidos");
-}
-
-if(document.readyState === "loading"){
-  document.addEventListener("DOMContentLoaded", initUI);
-} else {
-  initUI();
-}
+hide("adminArea");
+show("firebaseLogin");
+setActiveTab("pedidos");
