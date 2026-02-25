@@ -673,6 +673,33 @@ async function upsertCustomerProfile(profile){
 }
 
 async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile }){
+  // FIX: Firestore no acepta undefined / NaN / Infinity / File/Blob en documentos.
+  const sanitize = (v)=>{
+    if(v === undefined) return undefined;
+    if(v === null) return null;
+
+    if(typeof v === "number") return Number.isFinite(v) ? v : 0;
+    if(typeof v === "string" || typeof v === "boolean") return v;
+
+    if(typeof File !== "undefined" && v instanceof File) return undefined;
+    if(typeof Blob !== "undefined" && v instanceof Blob) return undefined;
+
+    if(Array.isArray(v)){
+      return v.map(sanitize).filter(x => x !== undefined);
+    }
+
+    if(typeof v === "object"){
+      const out = {};
+      for(const [k,val] of Object.entries(v)){
+        const sv = sanitize(val);
+        if(sv !== undefined) out[k] = sv;
+      }
+      return out;
+    }
+
+    return undefined;
+  };
+
   try{
     LAST_ORDER_ERROR = null;
     const u = await ensureAnon();
@@ -680,34 +707,53 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
 
     // Recalcular con precios actuales
     const products = getProducts();
-    const items = cart.map(c=>{
-      const pid = c.productId || c.id; // el carrito guarda productId
+    const items = (cart||[]).map(c=>{
+      const pid = c.productId || c.id;
       const p = products.find(x=>x.id===pid) || { title:c.title, price:c.price, category:c.category, sub:c.sub };
       return {
         id: pid,
-        title: p.title,
-        price: Number(p.price||0),
-        qty: Number(c.qty||1),
+        title: String(p.title || ""),
+        price: Number(p.price || 0),
+        qty: Number(c.qty || 1),
         category: p.category || c.category || "",
         sub: p.sub || c.sub || "",
       };
     }).filter(i=>!!i.id);
-    const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
 
-    // Shipping: puede venir como texto ("Se confirma"). Firestore NO acepta NaN.
+    // Evita NaN
+    for(const it of items){
+      if(!Number.isFinite(it.price)) it.price = 0;
+      if(!Number.isFinite(it.qty) || it.qty <= 0) it.qty = 1;
+    }
+
+    const subtotal = items.reduce((s,i)=>s + (i.price*i.qty), 0);
+
+    // Shipping: puede venir como texto ("Se confirma")
     const shipParsed = Number(shippingCost);
     const ship = Number.isFinite(shipParsed) ? shipParsed : 0;
     const shippingPending = !Number.isFinite(shipParsed) || String(shippingCost||"").toLowerCase().includes("confirma");
 
-    const total = subtotal + ship;
+    const total = Math.round((subtotal + ship) * 100) / 100;
     const payNow = (CONFIG.paymentMode === "deposit50")
       ? Math.round((subtotal*0.5)*100)/100
-      : Math.round((total)*100)/100;
+      : Math.round(total*100)/100;
+
     const pointsEarned = Math.floor(subtotal/10);
 
-    const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
+    // Shipping sin undefined
+    const shippingSafe = sanitize({
+      fullName: shipping?.fullName || "",
+      cedula: shipping?.cedula || "",
+      phone: shipping?.phone || "",
+      city: shipping?.city || "",
+      address: shipping?.address || "",
+      reference: shipping?.reference || "",
+    }) || {};
+
+    // Documento seguro (sin undefined/NaN)
+    const orderPayload = sanitize({
       customerUid: u.uid,
-      shipping,
+      shipping: shippingSafe,
       items,
       subtotal,
       shippingCost: ship,
@@ -721,6 +767,8 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       createdAt: fb.serverTimestamp(),
       updatedAt: fb.serverTimestamp(),
     });
+
+    const orderRef = await fb.addDoc(fb.collection(db, "orders"), orderPayload);
     const orderId = orderRef.id;
     let proofUrl = null;
 
@@ -731,50 +779,61 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
         const r = fb.ref(storage, path);
         await fb.uploadBytes(r, proofFile);
         proofUrl = await fb.getDownloadURL(r);
-        await fb.updateDoc(fb.doc(db, "orders", orderId), {
+
+        await fb.updateDoc(fb.doc(db, "orders", orderId), sanitize({
           proofUrl,
           proofName: safeName,
           status: "recibo_subido",
           updatedAt: fb.serverTimestamp(),
-        });
+        }));
       }catch(e){
         console.warn("Proof upload failed:", e);
-        try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { status:"nuevo", proofError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
+        try{
+          await fb.updateDoc(fb.doc(db, "orders", orderId), sanitize({
+            status:"nuevo",
+            proofError:true,
+            updatedAt: fb.serverTimestamp()
+          }));
+        }catch(_){}
       }
     }
 
-    try{ await fb.runTransaction(db, async (tx)=>{
-      for(const it of items){
-        const pref = fb.doc(db, "products", it.id);
-        const snap = await tx.get(pref);
-        if(!snap.exists()) continue;
-        const cur = snap.data().stock ?? 0;
-        const next = Math.max(0, Number(cur) - Number(it.qty||1));
-        tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
-      }
-      const cref = fb.doc(db, "customers", u.uid);
-      const csnap = await tx.get(cref);
-      const prev = csnap.exists() ? csnap.data() : {};
-      const prevPoints = Number(prev.points||0);
-      const prevSpent = Number(prev.totalSpent||0);
-      const prevCount = Number(prev.ordersCount||0);
-      tx.set(cref, {
-        uid: u.uid,
-        fullName: shipping.fullName,
-        cedula: shipping.cedula,
-        phone: shipping.phone,
-        city: shipping.city,
-        address: shipping.address,
-        reference: shipping.reference||"",
-        points: prevPoints + pointsEarned,
-        totalSpent: Math.round((prevSpent + subtotal)*100)/100,
-        ordersCount: prevCount + 1,
-        lastOrderId: orderId,
-        lastOrderAt: fb.serverTimestamp(),
-        updatedAt: fb.serverTimestamp(),
-        createdAt: prev.createdAt || fb.serverTimestamp(),
-      }, { merge:true });
-    }); }catch(e){
+    try{
+      await fb.runTransaction(db, async (tx)=>{
+        for(const it of items){
+          const pref = fb.doc(db, "products", it.id);
+          const snap = await tx.get(pref);
+          if(!snap.exists()) continue;
+          const cur = Number(snap.data().stock ?? 0);
+          const next = Math.max(0, cur - Number(it.qty||1));
+          tx.update(pref, { stock: Number.isFinite(next)?next:0, updatedAt: fb.serverTimestamp() });
+        }
+
+        const cref = fb.doc(db, "customers", u.uid);
+        const csnap = await tx.get(cref);
+        const prev = csnap.exists() ? csnap.data() : {};
+        const prevPoints = Number(prev.points||0);
+        const prevSpent  = Number(prev.totalSpent||0);
+        const prevCount  = Number(prev.ordersCount||0);
+
+        tx.set(cref, sanitize({
+          uid: u.uid,
+          fullName: shippingSafe.fullName,
+          cedula: shippingSafe.cedula,
+          phone: shippingSafe.phone,
+          city: shippingSafe.city,
+          address: shippingSafe.address,
+          reference: shippingSafe.reference || "",
+          points: (Number.isFinite(prevPoints)?prevPoints:0) + pointsEarned,
+          totalSpent: Math.round(((Number.isFinite(prevSpent)?prevSpent:0) + subtotal)*100)/100,
+          ordersCount: (Number.isFinite(prevCount)?prevCount:0) + 1,
+          lastOrderId: orderId,
+          lastOrderAt: fb.serverTimestamp(),
+          updatedAt: fb.serverTimestamp(),
+          createdAt: prev.createdAt || fb.serverTimestamp(),
+        }), { merge:true });
+      });
+    }catch(e){
       console.warn("Post-order transaction failed:", e);
       try{
         await fb.updateDoc(fb.doc(db, "orders", orderId), { postTxError:true, updatedAt: fb.serverTimestamp() });
