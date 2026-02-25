@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="es">
 <head>
@@ -14,175 +15,98 @@
     <img class="logo" id="logoTap" src="logo.png" alt="logo" />
     
 <div class="brand">
-  <div class="name" id="appNameLine1">NJ Global</div>
-  <div class="name" id="appNameLine2" class="name name2" style="margin-top:2px;">Express EC</div>
-  <div class="sub" id="subtitle">Compras Ecuador</div>
+  <div class="brandTitle" id="brandTap">Compras Ecuador</div>
+  <div class="brandSub">NJ Global Express</div>
 </div>
 
-<div class="actions">
-
-      <button class="btn aqua" id="btnTrack">Rastrear</button>
-      <button class="btn" id="btnShare">Compartir</button>
-      <button class="btn" id="btnHow">¿Cómo comprar?</button>
-<button class="btn" id="btnInstall" style="display:none;">Instalar</button>
+    <div class="right">
+      <button class="pill" id="installBtn" style="display:none">Instalar</button>
+      <button class="cartbtn" id="openCartBtn">
+        🛒 <span id="cartBadge" class="badge">0</span>
+      </button>
     </div>
   </header>
 
-  <main class="container">
+  <main class="wrap">
     <section class="hero">
-      <div style="min-width:0">
-        <h1>Productos Americanos</h1>
-        <p>Para agregar al carrito, primero completa tus datos de envío.</p>
+      <div class="heroLeft">
+        <h1>Productos 100% originales</h1>
+        <p>Compra fácil, paga por transferencia y envía tu comprobante.</p>
+        <div class="heroRow">
+          <div class="chip">✅ Calidad</div>
+          <div class="chip">🚚 Entregas</div>
+          <div class="chip">💳 Transferencia</div>
+        </div>
       </div>
-      <div class="right">
-        <button class="btn primary" id="btnMyData">Mis datos</button>
+      <div class="heroRight">
+        <div class="card">
+          <div class="cardTitle">Envíos</div>
+          <div class="cardText">Elige tu provincia y método de envío.</div>
+          <div class="row">
+            <select id="provSel" class="input"></select>
+            <select id="shipSel" class="input"></select>
+          </div>
+          <div class="small" id="shipInfo"></div>
+        </div>
       </div>
     </section>
 
-    <section class="pills" id="catPills"></section>
-    <section class="subpills" id="subPills"></section>
+    <section class="gridHeader">
+      <h2>Catálogo</h2>
+      <div class="searchRow">
+        <input id="q" class="input" placeholder="Buscar producto..." />
+        <select id="cat" class="input"></select>
+      </div>
+    </section>
 
-    <section class="grid" id="grid"></section>
+    <section id="grid" class="grid"></section>
 
+    <!-- CART DRAWER -->
+    <div id="cartDrawer" class="drawer">
+      <div class="drawerHead">
+        <div class="drawerTitle">Tu carrito</div>
+        <button class="iconbtn" id="closeCartBtn">✕</button>
+      </div>
 
-<footer class="footerbar">
-  <button class="socialbtn" id="igBtn" aria-label="Instagram" title="Instagram">
-    <span class="sicon">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5Z" stroke="currentColor" stroke-width="2"/><path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" stroke="currentColor" stroke-width="2"/><path d="M17.5 6.5h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
-    </span>
-    <span>Instagram</span>
-  </button>
+      <div id="cartList" class="cartList"></div>
 
-  <button class="socialbtn" id="ttBtn" aria-label="TikTok" title="TikTok">
-    <span class="sicon">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M14 3v10.2a3.8 3.8 0 1 1-3-3.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 6c1.1 2.4 3 3.9 6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    </span>
-    <span>TikTok</span>
-  </button>
+      <div class="drawerFoot">
+        <div class="totals">
+          <div class="totRow"><span>Subtotal</span><strong id="subTotal">$0.00</strong></div>
+          <div class="totRow"><span>Envío</span><strong id="shipTotal">$0.00</strong></div>
+          <div class="totRow big"><span>Total</span><strong id="grandTotal">$0.00</strong></div>
+        </div>
 
-  <button class="socialbtn" id="fbBtn" aria-label="Facebook" title="Facebook">
-    <span class="sicon">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M14 9h3V6h-3c-2.2 0-4 1.8-4 4v3H7v3h3v6h3v-6h3l1-3h-4v-3c0-.6.4-1 1-1Z" fill="currentColor"/></svg>
-    </span>
-    <span>Facebook</span>
-  </button>
-</footer>
+        <div class="paybox">
+          <div class="payTitle">Comprobante de pago</div>
+
+          <div class="fileRow">
+            <label class="filebtn" for="proof">📎 Adjuntar</label>
+            <input class="input" id="proof" type="file" accept="image/*" style="position:absolute; left:-9999px; width:1px; height:1px; opacity:0;" />
+            <label class="small" id="proofName" for="proof" style="margin-top:6px; opacity:.85; cursor:pointer;">Ningún archivo seleccionado</label>
+          </div>
+
+          <div class="small muted">Adjunta una captura o foto del comprobante para poder enviar el pedido.</div>
+        </div>
+
+        <button id="checkoutBtn" class="btn primary">Realizar pedido</button>
+        <div id="checkoutMsg" class="small muted" style="margin-top:10px;"></div>
+      </div>
+    </div>
+
+    <!-- MODAL -->
+    <div id="modal" class="modal" style="display:none;">
+      <div class="modalCard">
+        <div class="modalHead">
+          <strong id="mTitle">Título</strong>
+          <button class="iconbtn" id="mClose">✕</button>
+        </div>
+        <div id="mBody" class="modalBody"></div>
+      </div>
+    </div>
+
   </main>
 
-  <button class="fab" id="btnCart">🛒 <span>Carrito</span> <span class="badge" id="cartCount">0</span></button>
-
-  <div class="toast" id="iosHint">
-    <div class="row">
-      <div style="font-weight:980;">Instalar en iPhone</div>
-      <button class="btn" id="iosClose" style="margin-left:auto;">OK</button>
-    </div>
-    <div class="hint">Toca <b>Compartir</b> (cuadrado con flecha) → <b>Añadir a pantalla de inicio</b>.</div>
-  </div>
-
-  <div class="modal" id="modalHow">
-    <div class="sheet">
-      <div class="row">
-        <h2>Cómo comprar</h2>
-        <button class="close" data-close="modalHow">✕</button>
-      </div>
-      <div class="small" style="margin-top:6px">Tus datos se usan únicamente para procesar y enviar tu pedido.</div>
-      <ol style="margin:10px 0 0; padding-left:18px; line-height:1.5; font-size:13px;">
-        <li>Completa tus <b>datos de envío</b> (cédula, dirección, teléfono).</li>
-        <li>Elige la <b>categoría</b> y agrega tus productos.</li>
-        <li id="howPayLine"><b>Pago</b>: transferencia/depósito.</li>
-        <li>Sube la captura del comprobante.</li>
-        <li>Te enviamos el <b>número de guía</b> para rastrear en Servientrega.</li>
-      </ol>
-      <div style="margin-top:12px; display:flex; justify-content:flex-end;">
-        <button class="btn" data-close="modalHow">Entendido</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="modalReg">
-    <div class="sheet">
-      <div class="row">
-        <h2>Datos de envío</h2>
-        <button class="close" data-close="modalReg">✕</button>
-      </div>
-      <div class="small" style="margin-top:6px">Para agregar productos, primero completa tus datos.</div>
-
-      <div class="form">
-        <input class="input" id="fullName" placeholder="Nombres y apellidos" />
-        <div class="two">
-          <input class="input" id="cedula" placeholder="Cédula" />
-          <input class="input" id="phone" placeholder="Teléfono" />
-        </div>
-        <input class="input" id="city" placeholder="Ciudad" />
-        <input class="input" id="address" placeholder="Dirección completa" />
-        <input class="input" id="reference" placeholder="Referencia (opcional)" />
-        <div class="row" style="gap:10px;">
-          <button class="btn" data-close="modalReg" style="flex:1;">Cancelar</button>
-          <button class="btn primary" id="saveShipping" style="flex:1;">Guardar</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="modalCart">
-    <div class="sheet">
-      <div class="row">
-        <h2>Carrito</h2>
-        <button class="close" data-close="modalCart">✕</button>
-      </div>
-
-      <div class="cartlist" id="cartList"></div>
-
-      <div class="panel" id="payPanel" style="display:none;">
-        <div style="font-weight:980; font-size:14px;">Pago</div>
-
-        <div style="margin-top:10px; font-size:13px; display:grid; gap:4px;">
-          <div class="row"><span class="small">Subtotal</span><span style="margin-left:auto; font-weight:980;" id="subtotal">$0.00</span></div>
-          <div class="row"><span class="small">Envío</span><span style="margin-left:auto; font-weight:980;" id="shippingLabel">Se confirma</span></div>
-          <div class="hr"></div>
-          <div class="row"><span style="opacity:.92; font-weight:980;" id="dueLabel">Pago ahora</span><span style="margin-left:auto; font-weight:980;" id="dueNow">$0.00</span></div>
-        </div>
-
-        <div style="margin-top:10px; font-size:12px; opacity:.95;">
-          <div style="font-weight:980; margin-bottom:6px;">Cuentas para pago:</div>
-          <div id="banks" class="bankList"></div>
-        </div>
-
-        <div class="form" style="margin-top:10px;">
-          <div class="row" style="align-items:center;">
-            <div class="small" style="flex:1;">Si ya sabes el envío, pon el valor (opcional)</div>
-            <input class="input" id="shippingCost" type="number" value="0" style="width:140px; text-align:right;" />
-          </div>
-
-          <div class="filewrap">
-            <label class="filebtn" for="proof">Comprobante de pago</label>
-            <div class="small" style="font-weight:950; margin-bottom:6px;">Sube foto o captura del comprobante</div>
-            <!-- input oculto (sin botón duplicado) -->
-            <input class="input" id="proof" type="file" accept="image/*" style="position:absolute; left:-9999px; width:1px; height:1px; opacity:0;" />
-            <div class="small" id="proofName" style="margin-top:6px; opacity:.85; cursor:pointer;">Ningún archivo seleccionado</div>
-          </div>
-          <button class="btn primary" id="btnPlaceOrder">Realizar pedido</button>
-
-          <div id="orderResult" class="panel" style="margin-top:12px; display:none;">
-            <div style="font-weight:980;">✅ Pedido creado</div>
-            <div class="small" id="orderResultText" style="margin-top:6px;"></div>
-            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
-              <button class="btn primary" id="btnSendWhats" type="button">Enviar por WhatsApp</button>
-              <button class="btn" id="btnNewOrder" type="button">Seguir comprando</button>
-            </div>
-          </div>
-
-          <div class="small">Se crea un ID y luego tú decides si lo envías por WhatsApp.</div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div style="font-weight:980; font-size:14px;">Mis pedidos</div>
-        <div id="ordersList" class="cartlist" style="margin-top:10px;"></div>
-      </div>
-    </div>
-  </div>
-
-  <script type="module" src="app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

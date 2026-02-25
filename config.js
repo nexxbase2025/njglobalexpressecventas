@@ -2,6 +2,7 @@ export const CONFIG = {
   appName: "NJ Global Express EC",
   subtitle: "Compras Ecuador",
   whatsapp: "0983706294",
+  whatsappPhone: "0983706294",
   socials: {
     instagram: "https://example.com",
     tiktok: "https://example.com",
@@ -25,7 +26,8 @@ categoryColors: {
   all: "rgba(0,180,255,.18)",
   ropa: "rgba(255,60,90,.20)",
   calzado: "rgba(0,200,255,.18)",
-  bisuteria: "rgba(0,255,170,.16)",
+  perfumeria: "rgba(0,255,170,.16)",
+  bisuteria: "rgba(0,255,170,.16)", // compat (si tienes productos viejos)
   electronica: "rgba(170,120,255,.18)",
 },
 
@@ -33,7 +35,8 @@ categories: [
 
     { id: "ropa", label: "Ropa", subs: ["Dama", "Caballero", "Niños", "Otros"] },
     { id: "calzado", label: "Calzado", subs: ["Dama", "Caballero", "Niños", "Otros"] },
-    { id: "bisuteria", label: "Perfumería", subs: ["Dama", "Caballero", "Niños", "Otros"] },
+    { id: "perfumeria", label: "Perfumería", subs: ["Dama", "Caballero", "Niños", "Otros"] },
+    { id: "bisuteria", label: "Bisutería (compat)", subs: ["Dama", "Caballero", "Niños", "Otros"] },
     { id: "electronica", label: "Electrónica", subs: ["Dama", "Caballero", "Niños", "Otros"] },
   ],
 
