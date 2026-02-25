@@ -655,8 +655,6 @@ async function initLiveFirebase(){
         console.warn("Firestore products listener error:", err);
       }
     );
-      renderGrid();
-    });
   }catch(e){
     console.warn("Firestore products listener failed:", e);
   }
