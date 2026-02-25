@@ -49,19 +49,29 @@ let MY_ORDERS = [];
 function bindProofInput(){
   const inp = $("proof");
   const label = $("proofName");
-  const fileBtn = document.querySelector('label.filebtn[for="proof"]');
   if(!inp || !label) return;
-  const update = ()=>{
-    const f = inp.files?.[0] || null;
+
+  // Evita duplicar listeners si se llama varias veces
+  if(inp.dataset.bound === "1"){
+    const f = inp.files?.[0] || PROOF_FILE || null;
+    label.textContent = f ? `${f.name} ✅` : "Ningún archivo seleccionado";
+    return;
+  }
+  inp.dataset.bound = "1";
+
+  const update = (e)=>{
+    const f = (e?.target?.files && e.target.files[0]) ? e.target.files[0] : (inp.files?.[0] || null);
     PROOF_FILE = f;
-    label.textContent = f ? f.name : "Ningún archivo seleccionado";
+    label.textContent = f ? `${f.name} ✅` : "Ningún archivo seleccionado";
   };
+
   inp.addEventListener("change", update);
-  // Permite abrir el selector tocando el texto o el botón/label
-  const pick = ()=>{ try{ inp.click(); }catch(_){ } };
-  label.addEventListener("click", pick);
-  if(fileBtn) fileBtn.addEventListener("click", pick);
-  update();
+
+  // NO agregues click al botón/label con for="proof" (ya abre el selector por sí solo)
+  // Solo permitimos abrir tocando el texto del nombre
+  label.addEventListener("click", ()=>{ try{ inp.click(); }catch(_){ } });
+
+  update({ target: inp });
 }
 
 
@@ -729,19 +739,21 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       }, { merge:true });
     }); }catch(e){
       console.warn("Post-order transaction failed:", e);
-      try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { postProcessError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
+      try{
+        await fb.updateDoc(fb.doc(db, "orders", orderId), { postTxError:true, updatedAt: fb.serverTimestamp() });
+      }catch(_){}
     }
 
     return { orderId, proofUrl };
+
   }catch(e){
-    console.warn("Order create failed:", e);
-    // Guardamos el error real para mostrarlo
-    LAST_ORDER_ERROR = e?.code || e?.message || String(e);
+    console.warn("createOrderInFirestore failed:", e);
+    LAST_ORDER_ERROR = (e && e.code) ? e.code : (e?.message || "error");
     return null;
   }
 }
 
-
+// Init UI
 ensurePWA();
 buildCategoryPills();
 buildSubPills();
