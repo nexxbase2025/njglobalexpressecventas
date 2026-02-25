@@ -1,25 +1,23 @@
-
-function dataURLToFile(dataUrl, filename){
-  try{
-    const parts = String(dataUrl).split(",");
-    const meta = parts[0] || "";
-    const b64 = parts[1] || "";
-    const mimeMatch = meta.match(/data:(.*?);base64/);
-    const mime = (mimeMatch && mimeMatch[1]) ? mimeMatch[1] : "image/jpeg";
-    const bin = atob(b64);
-    const len = bin.length;
-    const arr = new Uint8Array(len);
-    for(let i=0;i<len;i++) arr[i]=bin.charCodeAt(i);
-    return new File([arr], filename, { type: mime });
-  }catch(e){
-    return null;
-  }
-}
-
 import { CONFIG } from "./config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 
 const K = { shipping:"njge_shipping", cart:"njge_cart", orders:"njge_orders", products:"njge_products" };
+// --- Helpers para evitar "Invalid argument" (Firestore no acepta NaN/undefined) ---
+function toNumber(val, fallback=0){
+  if(val === null || val === undefined) return fallback;
+  if(typeof val === "number") return Number.isFinite(val) ? val : fallback;
+  // Strings tipo "$12.99", "12,99", "USD 12", etc.
+  const s = String(val).trim();
+  if(!s) return fallback;
+  const norm = s.replace(/[^0-9,.-]/g,"").replace(/,/g,".");
+  const n = parseFloat(norm);
+  return Number.isFinite(n) ? n : fallback;
+}
+function toInt(val, fallback=1){
+  const n = Math.round(toNumber(val, fallback));
+  return Number.isFinite(n) ? n : fallback;
+}
+
 const $ = (id)=>document.getElementById(id);
 
 let LAST_WA_URL = null;
@@ -63,73 +61,21 @@ function normalizeProduct(p){
 let FB_PRODUCTS_CACHE = null;
 let MY_ORDERS = [];
 
-// Estado del comprobante (iPhone a veces vacía input.files al cerrar el picker)
-let PROOF_FILE = null;
-let PROOF_DATAURL = null;
-
-
 function bindProofInput(){
   const inp = $("proof");
   const label = $("proofName");
+  const fileBtn = document.querySelector('label.filebtn[for="proof"]');
   if(!inp || !label) return;
-
-  // Recuperar respaldo (si existe)
-  try{
-    const saved = sessionStorage.getItem("proofDataUrl");
-    if(saved && !PROOF_DATAURL){
-      PROOF_DATAURL = saved;
-      label.textContent = "Comprobante cargado ✅";
-    }
-  }catch(_){}
-
-  const setLabel = (f)=>{
-    if(f){
-      const kb = Math.round((f.size||0)/1024);
-      label.textContent = `${f.name} • ${kb} KB ✅`;
-    }else if(PROOF_DATAURL){
-      label.textContent = "Comprobante cargado ✅";
-    }else{
-      label.textContent = "Ningún archivo seleccionado";
-    }
+  const update = ()=>{
+    const f = inp.files?.[0];
+    label.textContent = f ? f.name : "Ningún archivo seleccionado";
   };
-
-  const backupToDataUrl = (f)=>{
-    // Guardar un respaldo ligero (para iPhone). Si es muy pesado, no guardar.
-    if(!f) return;
-    if((f.size||0) > 3*1024*1024) return; // >3MB, evitamos sessionStorage
-    try{
-      const fr = new FileReader();
-      fr.onload = ()=>{
-        PROOF_DATAURL = String(fr.result||"");
-        try{ sessionStorage.setItem("proofDataUrl", PROOF_DATAURL); }catch(_){ }
-        setLabel(f);
-      };
-      fr.readAsDataURL(f);
-    }catch(_){ }
-  };
-
-  inp.addEventListener("change", ()=>{
-    const f = inp.files?.[0] || null;
-    PROOF_FILE = f;
-    if(f){
-      PROOF_DATAURL = null;
-      try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
-      setLabel(f);
-      backupToDataUrl(f);
-    }else{
-      PROOF_FILE = null;
-      setLabel(null);
-    }
-  });
-
-  // Permite abrir el selector tocando el texto (iOS a veces no respeta bien el input oculto)
-  label.addEventListener("click", ()=>{
-    try{ inp.click(); }catch(_){ }
-  });
-
-  // Estado inicial
-  PROOF_FILE = inp.files?.[0] || PROOF_FILE;
-  setLabel(PROOF_FILE);
+  inp.addEventListener("change", update);
+  // Permite abrir el selector tocando el texto o el botón/label
+  const pick = ()=>{ try{ inp.click(); }catch(_){ } };
+  label.addEventListener("click", pick);
+  if(fileBtn) fileBtn.addEventListener("click", pick);
+  update();
 }
 
 
@@ -415,7 +361,7 @@ function rm(id){ setCart(getCart().filter(i=>i.productId!==id)); updateCartBadge
 function renderPay(enriched){
   const subtotal=enriched.reduce((s,x)=>s+(Number(x.p.price||0)*x.ci.qty),0);
   $("subtotal").textContent=formatMoney(subtotal);
-  const ship=Math.max(0,Number($("shippingCost").value||0));
+  const ship=Math.max(0,toNumber($("shippingCost").value,0));
   $("shippingLabel").textContent=ship>0?formatMoney(ship):"Se confirma";
   const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(ship>0?subtotal+ship:subtotal);
   $("dueLabel").textContent=CONFIG.paymentMode==="deposit50"?"Pago ahora (50%)":"Pago ahora";
@@ -557,14 +503,14 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       }
     }
 
-    const file = PROOF_FILE || $("proof").files?.[0] || (PROOF_DATAURL ? dataURLToFile(PROOF_DATAURL, "comprobante.jpg") : null) || null;
+    const file=$("proof").files?.[0]||null;
     if(!file){
       alert("Adjunta el comprobante de pago antes de realizar el pedido.");
       return;
     }
 
     const subtotal=enriched.reduce((s,x)=>s+(Number(x.p.price||0)*x.ci.qty),0);
-    const ship=Math.max(0,Number($("shippingCost").value||0));
+    const ship=Math.max(0,toNumber($("shippingCost").value,0));
     const totalFinal=ship>0?subtotal+ship:null;
     const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(totalFinal??subtotal);
 
@@ -613,7 +559,6 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
 
     // Guardado silencioso: limpiamos carrito y comprobante
     $("proof").value = "";
-    PROOF_FILE = null; PROOF_DATAURL = null; try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
     bindProofInput();
     setCart([]); updateCartBadge(); renderCart();
 
@@ -701,20 +646,15 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       return {
         id: c.id,
         title: p.title,
-        price: Number(p.price||0),
-        qty: Number(c.qty||1),
+        price: toNumber(p.price, 0),
+        qty: toInt(c.qty, 1),
         category: p.category||c.category||"",
         sub: p.sub||c.sub||"",
       };
     });
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
-
-// Shipping: puede venir como texto ("Se confirma"). Firestore NO acepta NaN.
-const shipParsed = Number(shippingCost);
-const ship = Number.isFinite(shipParsed) ? shipParsed : 0;
-const shippingPending = !Number.isFinite(shipParsed) || String(shippingCost||"").toLowerCase().includes("confirma");
-
-const total = subtotal + ship;
+    const ship = toNumber(shippingCost, 0);
+    const total = subtotal + ship;
     // Mantener coherencia con CONFIG.paymentMode y lo que el cliente ve en pantalla.
     const payNow = (CONFIG.paymentMode === "deposit50")
       ? Math.round((subtotal*0.5)*100)/100
@@ -722,20 +662,24 @@ const total = subtotal + ship;
     const pointsEarned = Math.floor(subtotal/10);
 
     // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
+    // Sanitiza números para evitar NaN/Infinity (Firestore lanza "Invalid argument")
+    const safeSubtotal = toNumber(subtotal, 0);
+    const safeShip = toNumber(ship, 0);
+    const safeTotal = toNumber(total, safeSubtotal + safeShip);
+    const safePayNow = toNumber(payNow, safeTotal);
+    const safePoints = toInt(pointsEarned, 0);
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
       customerUid: u.uid,
       shipping,
       items,
-      subtotal,
-      shippingCost: ship,
-      shippingPending,
-      shippingCostText: shippingPending ? String(shippingCost||"Se confirma") : "",
-      total,
-      payNow,
+      subtotal: safeSubtotal,
+      shippingCost: safeShip,
+      total: safeTotal,
+      payNow: safePayNow,
       paymentMode: CONFIG.paymentMode || "full",
       status: proofFile ? "recibo_subido" : "nuevo",
       trackingNumber: "",
-      pointsEarned,
+      pointsEarned: safePoints,
       createdAt: fb.serverTimestamp(),
       updatedAt: fb.serverTimestamp(),
     });
