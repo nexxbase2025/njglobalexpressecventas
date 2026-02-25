@@ -5,6 +5,7 @@ const K = { shipping:"njge_shipping", cart:"njge_cart", orders:"njge_orders", pr
 const $ = (id)=>document.getElementById(id);
 
 let LAST_WA_URL = null;
+let LAST_ORDER_ERROR = null;
 
 function getJSON(k,f){ try{ const r=localStorage.getItem(k); return r?JSON.parse(r):f; }catch{ return f; } }
 function setJSON(k,v){ localStorage.setItem(k, JSON.stringify(v)); }
@@ -43,7 +44,6 @@ function normalizeProduct(p){
 }
 let FB_PRODUCTS_CACHE = null;
 let MY_ORDERS = [];
-let PROOF_FILE = null;
 
 function bindProofInput(){
   const inp = $("proof");
@@ -51,8 +51,7 @@ function bindProofInput(){
   const fileBtn = document.querySelector('label.filebtn[for="proof"]');
   if(!inp || !label) return;
   const update = ()=>{
-    const f = inp.files?.[0] || null;
-    PROOF_FILE = f;
+    const f = inp.files?.[0];
     label.textContent = f ? f.name : "Ningún archivo seleccionado";
   };
   inp.addEventListener("change", update);
@@ -146,15 +145,18 @@ $("fbBtn").addEventListener("click",()=>window.open(CONFIG.socials.facebook,"_bl
    - En el tope (scroll arriba), jala hacia abajo 3 veces (pull).
 */
 (function setupHiddenAdmin(){
-  const el = $("subtitle");
-  if(el){
+  // A veces el usuario toca el bloque completo (no solo el texto).
+  // Soportamos tap 4x en: "Compras Ecuador" (subtitle) y en el bloque .brand.
+  const targets = [$("subtitle"), document.querySelector(".brand")].filter(Boolean);
+  if(targets.length){
     let taps=0; let tmr=null;
-    el.addEventListener("click",(e)=>{
+    const onTap = ()=>{
       taps += 1;
       if(tmr) clearTimeout(tmr);
       tmr = setTimeout(()=>{ taps=0; }, 900);
       if(taps>=4){ taps=0; location.href="admin.html"; }
-    });
+    };
+    targets.forEach(el=>el.addEventListener("click", onTap));
   }
 
   let pulls=0; let pullTimer=null;
@@ -485,7 +487,7 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       }
     }
 
-    const file=PROOF_FILE || $("proof")?.files?.[0] || null;
+    const file=$("proof").files?.[0]||null;
     if(!file){
       alert("Adjunta el comprobante de pago antes de realizar el pedido.");
       return;
@@ -548,7 +550,6 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     if(btn){ btn.disabled = false; btn.textContent = prevTxt || "Realizar pedido"; }
   }
 });
-);
 
 
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m])); }
@@ -638,7 +639,10 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
     const ship = Number(shippingCost||0);
     const total = subtotal + ship;
-    const payNow = Math.round((total*0.5)*100)/100;
+    // Mantener coherencia con CONFIG.paymentMode y lo que el cliente ve en pantalla.
+    const payNow = (CONFIG.paymentMode === "deposit50")
+      ? Math.round((subtotal*0.5)*100)/100
+      : Math.round((total)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
 
     // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
@@ -650,6 +654,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       shippingCost: ship,
       total,
       payNow,
+      paymentMode: CONFIG.paymentMode || "full",
       status: proofFile ? "recibo_subido" : "nuevo",
       trackingNumber: "",
       pointsEarned,
