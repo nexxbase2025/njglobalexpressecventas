@@ -78,60 +78,48 @@ function bindProofInput(){
     const saved = sessionStorage.getItem("proofDataUrl");
     if(saved && !PROOF_DATAURL){
       PROOF_DATAURL = saved;
-      label.textContent = "Comprobante cargado ✅";
     }
-  }catch(_){}
+  }catch(e){}
 
-  const setLabel = (f)=>{
-    if(f){
-      const kb = Math.round((f.size||0)/1024);
-      label.textContent = `${f.name} • ${kb} KB ✅`;
-    }else if(PROOF_DATAURL){
-      label.textContent = "Comprobante cargado ✅";
-    }else{
-      label.textContent = "Ningún archivo seleccionado";
+  const updateLabel = ()=>{
+    if(PROOF_FILE){
+      label.textContent = `${PROOF_FILE.name} ✅`;
+      return;
     }
+    if(PROOF_DATAURL){
+      label.textContent = `Comprobante guardado ✅`;
+      return;
+    }
+    label.textContent = "Ningún archivo seleccionado";
   };
 
-  const backupToDataUrl = (f)=>{
-    // Guardar un respaldo ligero (para iPhone). Si es muy pesado, no guardar.
-    if(!f) return;
-    if((f.size||0) > 3*1024*1024) return; // >3MB, evitamos sessionStorage
-    try{
-      const fr = new FileReader();
-      fr.onload = ()=>{
-        PROOF_DATAURL = String(fr.result||"");
-        try{ sessionStorage.setItem("proofDataUrl", PROOF_DATAURL); }catch(_){ }
-        setLabel(f);
-      };
-      fr.readAsDataURL(f);
-    }catch(_){ }
-  };
+  // Evita duplicar listeners si se llama varias veces
+  if(inp.dataset.bound === "1"){
+    updateLabel();
+    return;
+  }
+  inp.dataset.bound = "1";
 
-  inp.addEventListener("change", ()=>{
-    const f = inp.files?.[0] || null;
+  inp.addEventListener("change", async (e)=>{
+    const f = e?.target?.files?.[0] || null;
     PROOF_FILE = f;
+    PROOF_DATAURL = null;
+
     if(f){
-      PROOF_DATAURL = null;
-      try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
-      setLabel(f);
-      backupToDataUrl(f);
+      // respaldo DataURL para iPhone (por si inp.files se pierde)
+      try{
+        const dataUrl = await fileToDataUrl(f);
+        PROOF_DATAURL = dataUrl;
+        sessionStorage.setItem("proofDataUrl", dataUrl);
+      }catch(err){}
     }else{
-      PROOF_FILE = null;
-      setLabel(null);
+      try{ sessionStorage.removeItem("proofDataUrl"); }catch(err){}
     }
+    updateLabel();
   });
 
-  // Permite abrir el selector tocando el texto (iOS a veces no respeta bien el input oculto)
-  label.addEventListener("click", ()=>{
-    try{ inp.click(); }catch(_){ }
-  });
-
-  // Estado inicial
-  PROOF_FILE = inp.files?.[0] || PROOF_FILE;
-  setLabel(PROOF_FILE);
+  updateLabel();
 }
-
 
 function getProducts(){
   if(FB_PRODUCTS_CACHE) return FB_PRODUCTS_CACHE;
@@ -181,7 +169,6 @@ function pillColor(catId){
   return (CONFIG.categoryColors && CONFIG.categoryColors[catId]) ? CONFIG.categoryColors[catId] : "rgba(255,255,255,.10)";
 }
 
-
 let activeSub="";
 let rotationIndex=0;
 let rotationTimer=null;
@@ -209,14 +196,11 @@ $("igBtn").addEventListener("click",()=>window.open(CONFIG.socials.instagram,"_b
 $("ttBtn").addEventListener("click",()=>window.open(CONFIG.socials.tiktok,"_blank","noopener,noreferrer"));
 $("fbBtn").addEventListener("click",()=>window.open(CONFIG.socials.facebook,"_blank","noopener,noreferrer"));
 
-
 /* Admin discreto (sin zoom):
    - Toca "Compras Ecuador" 4 veces rápido, o
    - En el tope (scroll arriba), jala hacia abajo 3 veces (pull).
 */
 (function setupHiddenAdmin(){
-  // A veces el usuario toca el bloque completo (no solo el texto).
-  // Soportamos tap 4x en: "Compras Ecuador" (subtitle) y en el bloque .brand.
   const targets = [$("subtitle"), document.querySelector(".brand")].filter(Boolean);
   if(targets.length){
     let taps=0; let tmr=null;
@@ -359,7 +343,6 @@ async function renderGrid(){
   const urls=view.map(v=>v.imageUrl);
   await preloadImages(urls);
 
-  // Swap sin flash
   const html=view.map(cardHTML).join("");
   grid.style.transition = "opacity .22s ease";
   grid.style.opacity = "0";
@@ -420,9 +403,8 @@ function renderPay(enriched){
   const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(ship>0?subtotal+ship:subtotal);
   $("dueLabel").textContent=CONFIG.paymentMode==="deposit50"?"Pago ahora (50%)":"Pago ahora";
   $("dueNow").textContent=formatMoney(due);
-  // Bancos con “logo” + acordeón
+
   const bankLogo = (key)=>{
-    // Iconos simples (sin depender de imágenes externas)
     if(key==="pichincha") return "🏦";
     if(key==="guayaquil") return "💳";
     if(key==="cb") return "🏛️";
@@ -460,7 +442,6 @@ function renderPay(enriched){
       const item=head.closest('.bankItem');
       const body=item.querySelector('.bankBody');
       const open=body.style.display==='block';
-      // cerrar otros
       banksEl.querySelectorAll('.bankBody').forEach(b=>b.style.display='none');
       body.style.display = open ? 'none' : 'block';
     });
@@ -557,7 +538,12 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       }
     }
 
-    const file = PROOF_FILE || $("proof").files?.[0] || (PROOF_DATAURL ? dataURLToFile(PROOF_DATAURL, "comprobante.jpg") : null) || null;
+    // iPhone fallback: si PROOF_FILE se pierde, reconstruimos desde DataURL
+    let file = PROOF_FILE || $("proof").files?.[0] || null;
+    if(!file && PROOF_DATAURL){
+      file = dataURLToFile(PROOF_DATAURL, `comprobante_${Date.now()}.jpg`);
+    }
+
     if(!file){
       alert("Adjunta el comprobante de pago antes de realizar el pedido.");
       return;
@@ -592,7 +578,6 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       proofUrl,
     };
 
-    // Mostrar confirmación + botón de WhatsApp (fallback iPhone/WebView)
     const e164=toWhatsAppE164(CONFIG.whatsapp || "0983706294");
     const waUrl = `https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`;
 
@@ -603,17 +588,17 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     LAST_WA_URL = waUrl; if(waBtn){ waBtn.style.display = "inline-flex"; }
     if(resBox) resBox.style.display = "block";
 
-    // Intento de abrir WhatsApp (misma pestaña evita about:blank en iPhone)
     try{
       window.location.href = waUrl;
     }catch(e){
       console.warn(e);
-      // si falla, el botón queda para tocarlo manual
     }
 
-    // Guardado silencioso: limpiamos carrito y comprobante
+    // limpiar comprobante y carrito
+    PROOF_FILE = null;
+    PROOF_DATAURL = null;
+    try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){}
     $("proof").value = "";
-    PROOF_FILE = null; PROOF_DATAURL = null; try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
     bindProofInput();
     setCart([]); updateCartBadge(); renderCart();
 
@@ -621,7 +606,6 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     if(btn){ btn.disabled = false; btn.textContent = prevTxt || "Realizar pedido"; }
   }
 });
-
 
 function escapeHtml(s){ return String(s??"").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m])); }
 
@@ -631,9 +615,10 @@ async function initLiveFirebase(){
   const btnNew = $("btnNewOrder");
   if(btnSend) btnSend.addEventListener("click", ()=>{ if(LAST_WA_URL) window.location.href = LAST_WA_URL; });
   if(btnNew) btnNew.addEventListener("click", ()=>{ try{ closeModal("modalCart"); }catch(_){ } });
+
   // Evita que “productos demo” guardados en el navegador se mezclen con Firestore.
   try{ localStorage.removeItem(K.products); }catch(e){}
-  // Productos (stock global)
+
   try{
     fb.onSnapshot(fb.collection(db, "products"), (snap)=>{
       const arr=[];
@@ -650,7 +635,6 @@ async function initLiveFirebase(){
     console.warn("Firestore products listener failed:", e);
   }
 
-  // Pedidos (por cliente anónimo)
   try{
     const u = await ensureAnon();
     if(u){
@@ -697,31 +681,30 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     // Recalcular con precios actuales
     const products = getProducts();
     const items = cart.map(c=>{
-      const p = products.find(x=>x.id===c.id) || { title:c.title, price:c.price };
+      const pid = c.productId || c.id; // el carrito guarda productId
+      const p = products.find(x=>x.id===pid) || { title:c.title, price:c.price, category:c.category, sub:c.sub };
       return {
-        id: c.id,
+        id: pid,
         title: p.title,
         price: Number(p.price||0),
         qty: Number(c.qty||1),
-        category: p.category||c.category||"",
-        sub: p.sub||c.sub||"",
+        category: p.category || c.category || "",
+        sub: p.sub || c.sub || "",
       };
-    });
+    }).filter(i=>!!i.id);
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
 
-// Shipping: puede venir como texto ("Se confirma"). Firestore NO acepta NaN.
-const shipParsed = Number(shippingCost);
-const ship = Number.isFinite(shipParsed) ? shipParsed : 0;
-const shippingPending = !Number.isFinite(shipParsed) || String(shippingCost||"").toLowerCase().includes("confirma");
+    // Shipping: puede venir como texto ("Se confirma"). Firestore NO acepta NaN.
+    const shipParsed = Number(shippingCost);
+    const ship = Number.isFinite(shipParsed) ? shipParsed : 0;
+    const shippingPending = !Number.isFinite(shipParsed) || String(shippingCost||"").toLowerCase().includes("confirma");
 
-const total = subtotal + ship;
-    // Mantener coherencia con CONFIG.paymentMode y lo que el cliente ve en pantalla.
+    const total = subtotal + ship;
     const payNow = (CONFIG.paymentMode === "deposit50")
       ? Math.round((subtotal*0.5)*100)/100
       : Math.round((total)*100)/100;
     const pointsEarned = Math.floor(subtotal/10);
 
-    // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
       customerUid: u.uid,
       shipping,
@@ -729,7 +712,6 @@ const total = subtotal + ship;
       subtotal,
       shippingCost: ship,
       shippingPending,
-      shippingCostText: shippingPending ? String(shippingCost||"Se confirma") : "",
       total,
       payNow,
       paymentMode: CONFIG.paymentMode || "full",
@@ -742,10 +724,6 @@ const total = subtotal + ship;
     const orderId = orderRef.id;
     let proofUrl = null;
 
-    // A PARTIR DE AQUÍ: todo es "best effort".
-    // Si algo falla (Storage, stock, cliente), igual devolvemos el orderId.
-
-    // 2) Subir comprobante (si existe) — si falla NO bloquea el pedido
     if(proofFile){
       try{
         const safeName = (proofFile.name||"pago.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
@@ -761,16 +739,11 @@ const total = subtotal + ship;
         });
       }catch(e){
         console.warn("Proof upload failed:", e);
-        // marcamos el pedido para que admin sepa que faltó comprobante
         try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { status:"nuevo", proofError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
       }
     }
 
-    // 3) Descontar stock + actualizar cliente (transacción)
-    // OJO: si tus Rules NO permiten al cliente modificar products/customers, esto fallará.
-    // En ese caso, igual devolvemos orderId.
     try{ await fb.runTransaction(db, async (tx)=>{
-      // stock
       for(const it of items){
         const pref = fb.doc(db, "products", it.id);
         const snap = await tx.get(pref);
@@ -779,7 +752,6 @@ const total = subtotal + ship;
         const next = Math.max(0, Number(cur) - Number(it.qty||1));
         tx.update(pref, { stock: next, updatedAt: fb.serverTimestamp() });
       }
-      // cliente
       const cref = fb.doc(db, "customers", u.uid);
       const csnap = await tx.get(cref);
       const prev = csnap.exists() ? csnap.data() : {};
@@ -804,19 +776,21 @@ const total = subtotal + ship;
       }, { merge:true });
     }); }catch(e){
       console.warn("Post-order transaction failed:", e);
-      try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { postProcessError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
+      try{
+        await fb.updateDoc(fb.doc(db, "orders", orderId), { postTxError:true, updatedAt: fb.serverTimestamp() });
+      }catch(_){}
     }
 
     return { orderId, proofUrl };
+
   }catch(e){
-    console.warn("Order create failed:", e);
-    // Guardamos el error real para mostrarlo
-    LAST_ORDER_ERROR = e?.code || e?.message || String(e);
+    console.warn("createOrderInFirestore failed:", e);
+    LAST_ORDER_ERROR = (e && e.code) ? e.code : (e?.message || "error");
     return null;
   }
 }
 
-
+// Init UI
 ensurePWA();
 buildCategoryPills();
 buildSubPills();
