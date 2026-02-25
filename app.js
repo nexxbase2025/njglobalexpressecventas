@@ -1,3 +1,21 @@
+
+function dataURLToFile(dataUrl, filename){
+  try{
+    const parts = String(dataUrl).split(",");
+    const meta = parts[0] || "";
+    const b64 = parts[1] || "";
+    const mimeMatch = meta.match(/data:(.*?);base64/);
+    const mime = (mimeMatch && mimeMatch[1]) ? mimeMatch[1] : "image/jpeg";
+    const bin = atob(b64);
+    const len = bin.length;
+    const arr = new Uint8Array(len);
+    for(let i=0;i<len;i++) arr[i]=bin.charCodeAt(i);
+    return new File([arr], filename, { type: mime });
+  }catch(e){
+    return null;
+  }
+}
+
 import { CONFIG } from "./config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 
@@ -6,7 +24,6 @@ const $ = (id)=>document.getElementById(id);
 
 let LAST_WA_URL = null;
 let LAST_ORDER_ERROR = null;
-let PROOF_FILE = null; // mantiene el archivo seleccionado aunque el input se reinicie
 
 function getJSON(k,f){ try{ const r=localStorage.getItem(k); return r?JSON.parse(r):f; }catch{ return f; } }
 function setJSON(k,v){ localStorage.setItem(k, JSON.stringify(v)); }
@@ -46,22 +63,73 @@ function normalizeProduct(p){
 let FB_PRODUCTS_CACHE = null;
 let MY_ORDERS = [];
 
+// Estado del comprobante (iPhone a veces vacía input.files al cerrar el picker)
+let PROOF_FILE = null;
+let PROOF_DATAURL = null;
+
+
 function bindProofInput(){
   const inp = $("proof");
   const label = $("proofName");
-  const fileBtn = document.querySelector('label.filebtn[for="proof"]');
   if(!inp || !label) return;
-  const update = ()=>{
+
+  // Recuperar respaldo (si existe)
+  try{
+    const saved = sessionStorage.getItem("proofDataUrl");
+    if(saved && !PROOF_DATAURL){
+      PROOF_DATAURL = saved;
+      label.textContent = "Comprobante cargado ✅";
+    }
+  }catch(_){}
+
+  const setLabel = (f)=>{
+    if(f){
+      const kb = Math.round((f.size||0)/1024);
+      label.textContent = `${f.name} • ${kb} KB ✅`;
+    }else if(PROOF_DATAURL){
+      label.textContent = "Comprobante cargado ✅";
+    }else{
+      label.textContent = "Ningún archivo seleccionado";
+    }
+  };
+
+  const backupToDataUrl = (f)=>{
+    // Guardar un respaldo ligero (para iPhone). Si es muy pesado, no guardar.
+    if(!f) return;
+    if((f.size||0) > 3*1024*1024) return; // >3MB, evitamos sessionStorage
+    try{
+      const fr = new FileReader();
+      fr.onload = ()=>{
+        PROOF_DATAURL = String(fr.result||"");
+        try{ sessionStorage.setItem("proofDataUrl", PROOF_DATAURL); }catch(_){ }
+        setLabel(f);
+      };
+      fr.readAsDataURL(f);
+    }catch(_){ }
+  };
+
+  inp.addEventListener("change", ()=>{
     const f = inp.files?.[0] || null;
     PROOF_FILE = f;
-    label.textContent = f ? f.name : "Ningún archivo seleccionado";
-  };
-  inp.addEventListener("change", update);
-  // Permite abrir el selector tocando el texto o el botón/label
-  const pick = ()=>{ try{ inp.click(); }catch(_){ } };
-  label.addEventListener("click", pick);
-  if(fileBtn) fileBtn.addEventListener("click", pick);
-  update();
+    if(f){
+      PROOF_DATAURL = null;
+      try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
+      setLabel(f);
+      backupToDataUrl(f);
+    }else{
+      PROOF_FILE = null;
+      setLabel(null);
+    }
+  });
+
+  // Permite abrir el selector tocando el texto (iOS a veces no respeta bien el input oculto)
+  label.addEventListener("click", ()=>{
+    try{ inp.click(); }catch(_){ }
+  });
+
+  // Estado inicial
+  PROOF_FILE = inp.files?.[0] || PROOF_FILE;
+  setLabel(PROOF_FILE);
 }
 
 
@@ -489,7 +557,7 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       }
     }
 
-    const file = PROOF_FILE || $("proof").files?.[0] || null;
+    const file = PROOF_FILE || $("proof").files?.[0] || (PROOF_DATAURL ? dataURLToFile(PROOF_DATAURL, "comprobante.jpg") : null) || null;
     if(!file){
       alert("Adjunta el comprobante de pago antes de realizar el pedido.");
       return;
@@ -544,8 +612,8 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     }
 
     // Guardado silencioso: limpiamos carrito y comprobante
-    PROOF_FILE = null;
     $("proof").value = "";
+    PROOF_FILE = null; PROOF_DATAURL = null; try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
     bindProofInput();
     setCart([]); updateCartBadge(); renderCart();
 
