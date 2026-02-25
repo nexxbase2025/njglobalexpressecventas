@@ -2,26 +2,11 @@ import { CONFIG } from "./config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 
 const K = { shipping:"njge_shipping", cart:"njge_cart", orders:"njge_orders", products:"njge_products" };
-// --- Helpers para evitar "Invalid argument" (Firestore no acepta NaN/undefined) ---
-function toNumber(val, fallback=0){
-  if(val === null || val === undefined) return fallback;
-  if(typeof val === "number") return Number.isFinite(val) ? val : fallback;
-  // Strings tipo "$12.99", "12,99", "USD 12", etc.
-  const s = String(val).trim();
-  if(!s) return fallback;
-  const norm = s.replace(/[^0-9,.-]/g,"").replace(/,/g,".");
-  const n = parseFloat(norm);
-  return Number.isFinite(n) ? n : fallback;
-}
-function toInt(val, fallback=1){
-  const n = Math.round(toNumber(val, fallback));
-  return Number.isFinite(n) ? n : fallback;
-}
-
 const $ = (id)=>document.getElementById(id);
 
 let LAST_WA_URL = null;
 let LAST_ORDER_ERROR = null;
+let PROOF_FILE = null; // mantiene el archivo seleccionado aunque el input se reinicie
 
 function getJSON(k,f){ try{ const r=localStorage.getItem(k); return r?JSON.parse(r):f; }catch{ return f; } }
 function setJSON(k,v){ localStorage.setItem(k, JSON.stringify(v)); }
@@ -61,123 +46,22 @@ function normalizeProduct(p){
 let FB_PRODUCTS_CACHE = null;
 let MY_ORDERS = [];
 
-// --- Comprobante de pago (robusto para iOS/PWA) ---
-let PROOF_FILE = null; // File/Blob
-let PROOF_META = null; // {name,size,type,dataUrl}
-const PROOF_KEY = "njge_proof_meta_v1";
-
-function dataUrlToBlob(dataUrl){
-  const parts = String(dataUrl||"").split(",");
-  if(parts.length<2) return null;
-  const mime = (parts[0].match(/data:(.*?);base64/)||[])[1] || "application/octet-stream";
-  const bin = atob(parts[1]);
-  const arr = new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-  return new Blob([arr], {type:mime});
-}
-
-async function getProofForUpload(){
-  // 1) memoria
-  if(PROOF_FILE) return PROOF_FILE;
-  // 2) input
-  const inp = $("proof");
-  const f = inp?.files?.[0] || null;
-  if(f){ PROOF_FILE = f; return f; }
-  // 3) respaldo sessionStorage
-  try{
-    const raw = sessionStorage.getItem(PROOF_KEY);
-    if(!raw) return null;
-    const meta = JSON.parse(raw);
-    if(!meta?.dataUrl) return null;
-    const blob = dataUrlToBlob(meta.dataUrl);
-    if(!blob) return null;
-    // Si File existe, lo envolvemos para conservar name
-    try{
-      if(typeof File !== "undefined"){
-        const file = new File([blob], meta.name||"comprobante.jpg", {type: meta.type||blob.type||"image/jpeg"});
-        PROOF_FILE = file;
-        return file;
-      }
-    }catch(_){ }
-    // fallback blob
-    blob.name = meta.name || "comprobante.jpg";
-    PROOF_FILE = blob;
-    return blob;
-  }catch(_){ return null; }
-}
-
-function clearProof(){
-  PROOF_FILE = null; PROOF_META = null;
-  try{ sessionStorage.removeItem(PROOF_KEY); }catch(_){ }
-  const inp = $("proof");
-  if(inp) inp.value = "";
-  const label = $("proofName");
-  if(label) label.textContent = "Ningún archivo seleccionado";
-}
-
-
 function bindProofInput(){
   const inp = $("proof");
   const label = $("proofName");
   const fileBtn = document.querySelector('label.filebtn[for="proof"]');
   if(!inp || !label) return;
-
-  const render = (meta)=>{
-    if(!meta){
-      label.textContent = "Ningún archivo seleccionado";
-      label.style.color = "";
-      return;
-    }
-    const kb = Math.round((meta.size||0)/1024);
-    label.textContent = `✅ ${meta.name} • ${kb} KB`;
-    label.style.color = "lime";
-  };
-
-  const updateFromInput = async ()=>{
+  const update = ()=>{
     const f = inp.files?.[0] || null;
-    if(!f){
-      // Si el input quedó vacío pero tenemos respaldo, muéstralo
-      try{
-        const raw = sessionStorage.getItem(PROOF_KEY);
-        if(raw){ render(JSON.parse(raw)); return; }
-      }catch(_){}
-      render(null);
-      return;
-    }
     PROOF_FILE = f;
-    PROOF_META = { name: f.name||"comprobante.jpg", size: f.size||0, type: f.type||"image/jpeg", dataUrl: null };
-    render(PROOF_META);
-
-    // respaldo para iOS/PWA (solo si es razonable de tamaño)
-    try{
-      if((f.size||0) <= 2.5*1024*1024){
-        const dataUrl = await new Promise((res, rej)=>{
-          const fr = new FileReader();
-          fr.onload = ()=>res(fr.result);
-          fr.onerror = ()=>rej(new Error("filereader"));
-          fr.readAsDataURL(f);
-        });
-        PROOF_META.dataUrl = dataUrl;
-        sessionStorage.setItem(PROOF_KEY, JSON.stringify(PROOF_META));
-      }else{
-        sessionStorage.removeItem(PROOF_KEY);
-      }
-    }catch(_){}
+    label.textContent = f ? f.name : "Ningún archivo seleccionado";
   };
-
+  inp.addEventListener("change", update);
+  // Permite abrir el selector tocando el texto o el botón/label
   const pick = ()=>{ try{ inp.click(); }catch(_){ } };
   label.addEventListener("click", pick);
   if(fileBtn) fileBtn.addEventListener("click", pick);
-  inp.addEventListener("change", ()=>{ updateFromInput(); });
-
-  // Render inicial desde respaldo
-  try{
-    const raw = sessionStorage.getItem(PROOF_KEY);
-    if(raw) render(JSON.parse(raw));
-    else render(null);
-  }catch(_){ render(null); }
-}
-
+  update();
 }
 
 
@@ -463,7 +347,7 @@ function rm(id){ setCart(getCart().filter(i=>i.productId!==id)); updateCartBadge
 function renderPay(enriched){
   const subtotal=enriched.reduce((s,x)=>s+(Number(x.p.price||0)*x.ci.qty),0);
   $("subtotal").textContent=formatMoney(subtotal);
-  const ship=Math.max(0,toNumber($("shippingCost").value,0));
+  const ship=Math.max(0,Number($("shippingCost").value||0));
   $("shippingLabel").textContent=ship>0?formatMoney(ship):"Se confirma";
   const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(ship>0?subtotal+ship:subtotal);
   $("dueLabel").textContent=CONFIG.paymentMode==="deposit50"?"Pago ahora (50%)":"Pago ahora";
@@ -605,14 +489,14 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       }
     }
 
-    const file = await getProofForUpload();
+    const file = PROOF_FILE || $("proof").files?.[0] || null;
     if(!file){
       alert("Adjunta el comprobante de pago antes de realizar el pedido.");
       return;
     }
 
     const subtotal=enriched.reduce((s,x)=>s+(Number(x.p.price||0)*x.ci.qty),0);
-    const ship=Math.max(0,toNumber($("shippingCost").value,0));
+    const ship=Math.max(0,Number($("shippingCost").value||0));
     const totalFinal=ship>0?subtotal+ship:null;
     const due=CONFIG.paymentMode==="deposit50"?subtotal*0.5:(totalFinal??subtotal);
 
@@ -660,8 +544,10 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     }
 
     // Guardado silencioso: limpiamos carrito y comprobante
-    clearProof();
-setCart([]); updateCartBadge(); renderCart();
+    PROOF_FILE = null;
+    $("proof").value = "";
+    bindProofInput();
+    setCart([]); updateCartBadge(); renderCart();
 
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = prevTxt || "Realizar pedido"; }
@@ -747,14 +633,14 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       return {
         id: c.id,
         title: p.title,
-        price: toNumber(p.price, 0),
-        qty: toInt(c.qty, 1),
+        price: Number(p.price||0),
+        qty: Number(c.qty||1),
         category: p.category||c.category||"",
         sub: p.sub||c.sub||"",
       };
     });
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
-    const ship = toNumber(shippingCost, 0);
+    const ship = Number(shippingCost||0);
     const total = subtotal + ship;
     // Mantener coherencia con CONFIG.paymentMode y lo que el cliente ve en pantalla.
     const payNow = (CONFIG.paymentMode === "deposit50")
@@ -763,24 +649,18 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     const pointsEarned = Math.floor(subtotal/10);
 
     // 1) Crear el pedido primero para tener ID (si esto falla, NO hay pedido)
-    // Sanitiza números para evitar NaN/Infinity (Firestore lanza "Invalid argument")
-    const safeSubtotal = toNumber(subtotal, 0);
-    const safeShip = toNumber(ship, 0);
-    const safeTotal = toNumber(total, safeSubtotal + safeShip);
-    const safePayNow = toNumber(payNow, safeTotal);
-    const safePoints = toInt(pointsEarned, 0);
     const orderRef = await fb.addDoc(fb.collection(db, "orders"), {
       customerUid: u.uid,
       shipping,
       items,
-      subtotal: safeSubtotal,
-      shippingCost: safeShip,
-      total: safeTotal,
-      payNow: safePayNow,
+      subtotal,
+      shippingCost: ship,
+      total,
+      payNow,
       paymentMode: CONFIG.paymentMode || "full",
       status: proofFile ? "recibo_subido" : "nuevo",
       trackingNumber: "",
-      pointsEarned: safePoints,
+      pointsEarned,
       createdAt: fb.serverTimestamp(),
       updatedAt: fb.serverTimestamp(),
     });

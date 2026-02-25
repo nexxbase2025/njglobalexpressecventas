@@ -1,5 +1,4 @@
 import { CONFIG } from "./config.js";
-import { ADMIN_UID } from "./firebase-config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 
 const $ = (id)=>document.getElementById(id);
@@ -37,8 +36,7 @@ async function requireAdmin(){
   if(!u) return false;
 
   // Admin por UID (más seguro). Si no coincide, volvemos a mostrar login SIEMPRE.
-  const requiredUid = CONFIG.adminUid || ADMIN_UID || "";
-  if(requiredUid && u.uid !== requiredUid){
+  if(CONFIG.adminUid && u.uid !== CONFIG.adminUid){
     try{ alert("Esta cuenta no es admin de esta tienda."); }catch(_){}
     // Mostrar login de inmediato (evita pantalla en blanco si signOut demora/falla)
     show("firebaseLogin");
