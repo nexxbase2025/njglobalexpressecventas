@@ -1,3 +1,21 @@
+
+function dataURLToFile(dataUrl, filename){
+  try{
+    const parts = String(dataUrl).split(",");
+    const meta = parts[0] || "";
+    const b64 = parts[1] || "";
+    const mimeMatch = meta.match(/data:(.*?);base64/);
+    const mime = (mimeMatch && mimeMatch[1]) ? mimeMatch[1] : "image/jpeg";
+    const bin = atob(b64);
+    const len = bin.length;
+    const arr = new Uint8Array(len);
+    for(let i=0;i<len;i++) arr[i]=bin.charCodeAt(i);
+    return new File([arr], filename, { type: mime });
+  }catch(e){
+    return null;
+  }
+}
+
 import { CONFIG } from "./config.js";
 import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
 
@@ -6,7 +24,6 @@ const $ = (id)=>document.getElementById(id);
 
 let LAST_WA_URL = null;
 let LAST_ORDER_ERROR = null;
-let PROOF_FILE = null; // mantiene el archivo seleccionado aunque el input se reinicie
 
 function getJSON(k,f){ try{ const r=localStorage.getItem(k); return r?JSON.parse(r):f; }catch{ return f; } }
 function setJSON(k,v){ localStorage.setItem(k, JSON.stringify(v)); }
@@ -46,32 +63,73 @@ function normalizeProduct(p){
 let FB_PRODUCTS_CACHE = null;
 let MY_ORDERS = [];
 
+// Estado del comprobante (iPhone a veces vacía input.files al cerrar el picker)
+let PROOF_FILE = null;
+let PROOF_DATAURL = null;
+
+
 function bindProofInput(){
   const inp = $("proof");
   const label = $("proofName");
   if(!inp || !label) return;
 
-  // Evita duplicar listeners si se llama varias veces
-  if(inp.dataset.bound === "1"){
-    const f = inp.files?.[0] || PROOF_FILE || null;
-    label.textContent = f ? `${f.name} ✅` : "Ningún archivo seleccionado";
-    return;
-  }
-  inp.dataset.bound = "1";
+  // Recuperar respaldo (si existe)
+  try{
+    const saved = sessionStorage.getItem("proofDataUrl");
+    if(saved && !PROOF_DATAURL){
+      PROOF_DATAURL = saved;
+      label.textContent = "Comprobante cargado ✅";
+    }
+  }catch(_){}
 
-  const update = (e)=>{
-    const f = (e?.target?.files && e.target.files[0]) ? e.target.files[0] : (inp.files?.[0] || null);
-    PROOF_FILE = f;
-    label.textContent = f ? `${f.name} ✅` : "Ningún archivo seleccionado";
+  const setLabel = (f)=>{
+    if(f){
+      const kb = Math.round((f.size||0)/1024);
+      label.textContent = `${f.name} • ${kb} KB ✅`;
+    }else if(PROOF_DATAURL){
+      label.textContent = "Comprobante cargado ✅";
+    }else{
+      label.textContent = "Ningún archivo seleccionado";
+    }
   };
 
-  inp.addEventListener("change", update);
+  const backupToDataUrl = (f)=>{
+    // Guardar un respaldo ligero (para iPhone). Si es muy pesado, no guardar.
+    if(!f) return;
+    if((f.size||0) > 3*1024*1024) return; // >3MB, evitamos sessionStorage
+    try{
+      const fr = new FileReader();
+      fr.onload = ()=>{
+        PROOF_DATAURL = String(fr.result||"");
+        try{ sessionStorage.setItem("proofDataUrl", PROOF_DATAURL); }catch(_){ }
+        setLabel(f);
+      };
+      fr.readAsDataURL(f);
+    }catch(_){ }
+  };
 
-  // NO agregues click al botón/label con for="proof" (ya abre el selector por sí solo)
-  // Solo permitimos abrir tocando el texto del nombre
-  label.addEventListener("click", ()=>{ try{ inp.click(); }catch(_){ } });
+  inp.addEventListener("change", ()=>{
+    const f = inp.files?.[0] || null;
+    PROOF_FILE = f;
+    if(f){
+      PROOF_DATAURL = null;
+      try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
+      setLabel(f);
+      backupToDataUrl(f);
+    }else{
+      PROOF_FILE = null;
+      setLabel(null);
+    }
+  });
 
-  update({ target: inp });
+  // Permite abrir el selector tocando el texto (iOS a veces no respeta bien el input oculto)
+  label.addEventListener("click", ()=>{
+    try{ inp.click(); }catch(_){ }
+  });
+
+  // Estado inicial
+  PROOF_FILE = inp.files?.[0] || PROOF_FILE;
+  setLabel(PROOF_FILE);
 }
 
 
@@ -499,7 +557,7 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       }
     }
 
-    const file = PROOF_FILE || $("proof").files?.[0] || null;
+    const file = PROOF_FILE || $("proof").files?.[0] || (PROOF_DATAURL ? dataURLToFile(PROOF_DATAURL, "comprobante.jpg") : null) || null;
     if(!file){
       alert("Adjunta el comprobante de pago antes de realizar el pedido.");
       return;
@@ -554,8 +612,8 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
     }
 
     // Guardado silencioso: limpiamos carrito y comprobante
-    PROOF_FILE = null;
     $("proof").value = "";
+    PROOF_FILE = null; PROOF_DATAURL = null; try{ sessionStorage.removeItem("proofDataUrl"); }catch(_){ }
     bindProofInput();
     setCart([]); updateCartBadge(); renderCart();
 
@@ -639,20 +697,24 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     // Recalcular con precios actuales
     const products = getProducts();
     const items = cart.map(c=>{
-  const pid = c.productId || c.id; // compatibilidad por si algún carrito viejo guardó "id"
-  const p = products.find(x=>x.id===pid) || { title:c.title, price:c.price, category:c.category, sub:c.sub };
-  return {
-    id: pid,
-    title: p.title,
-    price: Number(p.price||0),
-    qty: Number(c.qty||1),
-    category: p.category || c.category || "",
-    sub: p.sub || c.sub || "",
-  };
-}).filter(i=>!!i.id);
+      const p = products.find(x=>x.id===c.id) || { title:c.title, price:c.price };
+      return {
+        id: c.id,
+        title: p.title,
+        price: Number(p.price||0),
+        qty: Number(c.qty||1),
+        category: p.category||c.category||"",
+        sub: p.sub||c.sub||"",
+      };
+    });
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
-    const ship = Number(shippingCost||0);
-    const total = subtotal + ship;
+
+// Shipping: puede venir como texto ("Se confirma"). Firestore NO acepta NaN.
+const shipParsed = Number(shippingCost);
+const ship = Number.isFinite(shipParsed) ? shipParsed : 0;
+const shippingPending = !Number.isFinite(shipParsed) || String(shippingCost||"").toLowerCase().includes("confirma");
+
+const total = subtotal + ship;
     // Mantener coherencia con CONFIG.paymentMode y lo que el cliente ve en pantalla.
     const payNow = (CONFIG.paymentMode === "deposit50")
       ? Math.round((subtotal*0.5)*100)/100
@@ -666,6 +728,8 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       items,
       subtotal,
       shippingCost: ship,
+      shippingPending,
+      shippingCostText: shippingPending ? String(shippingCost||"Se confirma") : "",
       total,
       payNow,
       paymentMode: CONFIG.paymentMode || "full",
@@ -740,21 +804,19 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       }, { merge:true });
     }); }catch(e){
       console.warn("Post-order transaction failed:", e);
-      try{
-        await fb.updateDoc(fb.doc(db, "orders", orderId), { postTxError:true, updatedAt: fb.serverTimestamp() });
-      }catch(_){}
+      try{ await fb.updateDoc(fb.doc(db, "orders", orderId), { postProcessError:true, updatedAt: fb.serverTimestamp() }); }catch(_){ }
     }
 
     return { orderId, proofUrl };
-
   }catch(e){
-    console.warn("createOrderInFirestore failed:", e);
-    LAST_ORDER_ERROR = (e && e.code) ? e.code : (e?.message || "error");
+    console.warn("Order create failed:", e);
+    // Guardamos el error real para mostrarlo
+    LAST_ORDER_ERROR = e?.code || e?.message || String(e);
     return null;
   }
 }
 
-// Init UI
+
 ensurePWA();
 buildCategoryPills();
 buildSubPills();

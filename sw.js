@@ -1,5 +1,5 @@
 // IMPORTANTE: cada deploy sube este número para evitar que el SW sirva archivos viejos.
-const CACHE = "njge-ventas-v10";
+const CACHE = "njge-ventas-v12";
 const ASSETS = [
   './',
   './index.html',
