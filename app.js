@@ -133,6 +133,21 @@ function getShipping(){ return getJSON(K.shipping,null); }
 function setShipping(s){ setJSON(K.shipping,s); }
 function getCart(){ return getJSON(K.cart,[]); }
 function setCart(c){ setJSON(K.cart,c); }
+function normalizeCart(){
+  try{
+    const cart = Array.isArray(getCart()) ? getCart() : [];
+    const map = new Map();
+    for(const it of cart){
+      const pid = it?.productId;
+      if(!pid) continue;
+      const qty = Math.max(1, Math.floor(Number(it.qty||1)));
+      map.set(pid, (map.get(pid)||0) + qty);
+    }
+    const next = Array.from(map.entries()).map(([productId, qty])=>({ productId, qty }));
+    setCart(next);
+  }catch(_){}
+}
+
 function getOrders(){ return getJSON(K.orders,[]); }
 function saveOrder(o){ const all=getOrders(); setJSON(K.orders,[o,...all]); }
 
@@ -299,7 +314,7 @@ function cardHTML(p){
   return `
   <article class="card">
     <div class="thumb">
-      <img src="${p.imageUrl}" alt="${escapeHtml(p.title)}"/>
+      <img src="${p.imageUrl}" alt="${escapeHtml(p.title)}" loading="lazy" decoding="async"/>
       <div class="badgePill left">${formatMoney(Number(p.price||0))}</div>
       <div class="badgePill right stock ${soldOut?"no":"ok"}">${soldOut?"Agotado":"Stock: "+(p.stock||0)}</div>
     </div>
@@ -339,9 +354,6 @@ async function renderGrid(){
   const ids=view.map(v=>v.id).join("|");
   if(ids === lastViewIds.join("|")) return;
   lastViewIds = view.map(v=>v.id);
-
-  const urls=view.map(v=>v.imageUrl);
-  await preloadImages(urls);
 
   const html=view.map(cardHTML).join("");
   grid.style.transition = "opacity .22s ease";
@@ -499,7 +511,7 @@ function renderCart(){
   $("payPanel").style.display=enriched.length?"block":"none";
   list.innerHTML=enriched.length?enriched.map(({ci,p})=>`
     <div class="item">
-      <img src="${p.imageUrl}" alt="${escapeHtml(p.title)}"/>
+      <img src="${p.imageUrl}" alt="${escapeHtml(p.title)}" loading="lazy" decoding="async"/>
       <div style="min-width:0">
         <div style="font-weight:980; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(p.title)}</div>
         <div class="small">${formatMoney(p.price)} • ${p.category?labelCat(p.category):""}</div>
@@ -616,19 +628,33 @@ async function initLiveFirebase(){
   if(btnSend) btnSend.addEventListener("click", ()=>{ if(LAST_WA_URL) window.location.href = LAST_WA_URL; });
   if(btnNew) btnNew.addEventListener("click", ()=>{ try{ closeModal("modalCart"); }catch(_){ } });
 
-  // Evita que “productos demo” guardados en el navegador se mezclen con Firestore.
-  try{ localStorage.removeItem(K.products); }catch(e){}
-
   try{
-    fb.onSnapshot(fb.collection(db, "products"), (snap)=>{
-      const arr=[];
-      snap.forEach(d=>arr.push({ id:d.id, ...d.data() }));
-      FB_PRODUCTS_CACHE = arr
-        .filter(p => (p && (p.active === undefined ? true : !!p.active)))
-        .sort((a,b)=>{
-          const ta=a.updatedAt?.seconds||0; const tb=b.updatedAt?.seconds||0;
-          return tb-ta;
-        });
+    fb.onSnapshot(
+      fb.query(
+        fb.collection(db, "products"),
+        fb.orderBy("updatedAt","desc"),
+        fb.limit(600)
+      ),
+      (snap)=>{
+        const arr=[];
+        snap.forEach(d=>arr.push({ id:d.id, ...d.data() }));
+        const clean = arr
+          .filter(p => (p && (p.active === undefined ? true : !!p.active)))
+          .sort((a,b)=>{
+            const ta=a.updatedAt?.seconds||0; const tb=b.updatedAt?.seconds||0;
+            return tb-ta;
+          });
+        FB_PRODUCTS_CACHE = clean;
+
+        // Guardar cache local para que cargue rápido la próxima vez
+        try{ setProducts(clean); }catch(_){}
+
+        renderGrid();
+      },
+      (err)=>{
+        console.warn("Firestore products listener error:", err);
+      }
+    );
       renderGrid();
     });
   }catch(e){
@@ -673,7 +699,7 @@ async function upsertCustomerProfile(profile){
 }
 
 async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile }){
-  // FIX: Firestore no acepta undefined / NaN / Infinity / File/Blob en documentos.
+  // FIX: Firestore no acepta undefined / NaN / Infinity / File/Blob dentro del documento.
   const sanitize = (v)=>{
     if(v === undefined) return undefined;
     if(v === null) return null;
@@ -750,7 +776,6 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       reference: shipping?.reference || "",
     }) || {};
 
-    // Documento seguro (sin undefined/NaN)
     const orderPayload = sanitize({
       customerUid: u.uid,
       shipping: shippingSafe,
@@ -849,12 +874,19 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
   }
 }
 
+
+// Sync entre pestañas/dispositivos (carrito)
+window.addEventListener("storage", (e)=>{
+  if(e.key===K.cart){ try{ normalizeCart(); updateCartBadge(); }catch(_){ } }
+});
+
 // Init UI
 ensurePWA();
 buildCategoryPills();
 buildSubPills();
 renderGrid();
 renderOrders();
+normalizeCart();
 updateCartBadge();
 startRotation();
 initLiveFirebase();
