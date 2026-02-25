@@ -708,8 +708,13 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       };
     });
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
-    const ship = Number(shippingCost||0);
-    const total = subtotal + ship;
+
+// Shipping: puede venir como texto ("Se confirma"). Firestore NO acepta NaN.
+const shipParsed = Number(shippingCost);
+const ship = Number.isFinite(shipParsed) ? shipParsed : 0;
+const shippingPending = !Number.isFinite(shipParsed) || String(shippingCost||"").toLowerCase().includes("confirma");
+
+const total = subtotal + ship;
     // Mantener coherencia con CONFIG.paymentMode y lo que el cliente ve en pantalla.
     const payNow = (CONFIG.paymentMode === "deposit50")
       ? Math.round((subtotal*0.5)*100)/100
@@ -723,6 +728,8 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       items,
       subtotal,
       shippingCost: ship,
+      shippingPending,
+      shippingCostText: shippingPending ? String(shippingCost||"Se confirma") : "",
       total,
       payNow,
       paymentMode: CONFIG.paymentMode || "full",
