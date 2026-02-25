@@ -153,6 +153,8 @@ async function showOrdersForCustomer(customerUid){
   setActiveTab("pedidos");
   const wrap = $("adminOrders");
   wrap.innerHTML = '<div class="small">Cargando pedidos del cliente…</div>';
+
+  // 1) Intento “bonito” (con orderBy)
   try{
     const q = fb.query(
       fb.collection(db,"orders"),
@@ -164,8 +166,32 @@ async function showOrdersForCustomer(customerUid){
     const orders=[];
     snap.forEach(d=>orders.push({id:d.id, ...d.data()}));
     renderOrders(orders);
+    return;
   }catch(e){
-    console.warn(e);
+    console.warn("showOrdersForCustomer primary failed:", e);
+  }
+
+  // 2) Fallback (SIN orderBy) — evita errores por índices/createdAt
+  try{
+    const q2 = fb.query(
+      fb.collection(db,"orders"),
+      fb.where("customerUid","==",customerUid),
+      fb.limit(100)
+    );
+    const snap2 = await fb.getDocs(q2);
+    const orders2=[];
+    snap2.forEach(d=>orders2.push({id:d.id, ...d.data()}));
+
+    // Ordena en frontend si existe createdAt
+    orders2.sort((a,b)=>{
+      const ta = a.createdAt?.seconds ? a.createdAt.seconds : 0;
+      const tb = b.createdAt?.seconds ? b.createdAt.seconds : 0;
+      return tb - ta;
+    });
+
+    renderOrders(orders2);
+  }catch(e2){
+    console.warn("showOrdersForCustomer fallback failed:", e2);
     wrap.innerHTML = '<div class="small">No se pudo cargar pedidos.</div>';
   }
 }
@@ -196,7 +222,16 @@ function renderOrders(orders){
     const ship = o.shipping || {};
     const status = o.status || "nuevo";
     const tracking = o.trackingNumber || "";
-    const proofUrl = o.proofUrl || "";
+    const proofUrl =
+  o.proofUrl ||
+  o.proofURL ||
+  o.receiptUrl ||
+  o.receiptURL ||
+  o.comprobanteUrl ||
+  o.comprobanteURL ||
+  o.voucherUrl ||
+  o.voucherURL ||
+  "";
     const items = Array.isArray(o.items) ? o.items : [];
     const lines = items.map(it=>`• ${escapeHtml(it.title||"Producto")} x${Number(it.qty||1)} (${money(it.price||0)})`).join("<br>");
     return `
