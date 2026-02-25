@@ -639,16 +639,17 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
     // Recalcular con precios actuales
     const products = getProducts();
     const items = cart.map(c=>{
-      const p = products.find(x=>x.id===c.id) || { title:c.title, price:c.price };
-      return {
-        id: c.id,
-        title: p.title,
-        price: Number(p.price||0),
-        qty: Number(c.qty||1),
-        category: p.category||c.category||"",
-        sub: p.sub||c.sub||"",
-      };
-    });
+  const pid = c.productId || c.id; // compatibilidad por si algún carrito viejo guardó "id"
+  const p = products.find(x=>x.id===pid) || { title:c.title, price:c.price, category:c.category, sub:c.sub };
+  return {
+    id: pid,
+    title: p.title,
+    price: Number(p.price||0),
+    qty: Number(c.qty||1),
+    category: p.category || c.category || "",
+    sub: p.sub || c.sub || "",
+  };
+}).filter(i=>!!i.id);
     const subtotal = items.reduce((s,i)=>s + i.price*i.qty, 0);
     const ship = Number(shippingCost||0);
     const total = subtotal + ship;
