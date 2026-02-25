@@ -18,7 +18,7 @@ export const CONFIG = {
   // Admin es por Email/Password de Firebase Auth (ya no usamos PIN demo)
 
   // Pega aquí tu UID de Firebase (solo este UID podrá entrar al Admin)
-  adminUid: "",
+  adminUid: "bAytuyDJDEasrhwOYcp9LSbwFgu1",
 
   
 categoryColors: {

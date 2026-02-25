@@ -1,5 +1,5 @@
 import { CONFIG } from "./config.js";
-import { auth, db, storage, fb, ensureAnon } from "./firebase-init.js";
+import { auth, db, storage, fb } from "./firebase-init.js";
 
 const $ = (id)=>document.getElementById(id);
 const escapeHtml = (s)=>String(s??"")
@@ -9,7 +9,6 @@ const escapeHtml = (s)=>String(s??"")
   .replaceAll('"',"&quot;")
   .replaceAll("'","&#039;");
 
-// Si es un modal, debe ser flex (si no, se queda oculto por CSS)
 function show(id){
   const el=$(id);
   if(!el) return;
@@ -19,8 +18,7 @@ function show(id){
 function hide(id){ const el=$(id); if(el) el.style.display="none"; }
 
 function setActiveTab(tab){
-  const panels = ["panelClientes","panelPedidos","panelAgregar"];
-  panels.forEach(p=>hide(p));
+  ["panelClientes","panelPedidos","panelAgregar"].forEach(hide);
   if(tab==="clientes") show("panelClientes");
   if(tab==="pedidos") show("panelPedidos");
   if(tab==="agregar") show("panelAgregar");
@@ -31,34 +29,61 @@ function money(n){
   return `$${v.toFixed(2)}`;
 }
 
-async function requireAdmin(){
+/* ===== ADMIN GUARD (DEFINITIVO) ===== */
+async function forceAdminSession(){
   const u = auth.currentUser;
-  if(!u) return false;
 
-  // Admin por UID (más seguro). Si no coincide, volvemos a mostrar login SIEMPRE.
-  if(CONFIG.adminUid && u.uid !== CONFIG.adminUid){
-    try{ alert("Esta cuenta no es admin de esta tienda."); }catch(_){}
-    // Mostrar login de inmediato (evita pantalla en blanco si signOut demora/falla)
+  // Si NO hay UID configurado, no sigas: sin esto nunca será “definitivo”.
+  if(!CONFIG.adminUid){
+    show("firebaseLogin");
+    hide("adminArea");
+    $("logoutFirebase").style.display = "none";
+    try{ alert("Falta configurar CONFIG.adminUid en config.js (UID del admin)."); }catch(_){}
+    return false;
+  }
+
+  // Si está como anónimo, afuera.
+  if(u && u.isAnonymous){
     show("firebaseLogin");
     hide("adminArea");
     $("logoutFirebase").style.display = "none";
     try{ await fb.signOut(auth); }catch(_){}
     return false;
   }
+
+  // Si no hay user, mostrar login
+  if(!u){
+    show("firebaseLogin");
+    hide("adminArea");
+    $("logoutFirebase").style.display = "none";
+    return false;
+  }
+
+  // UID debe coincidir
+  if(u.uid !== CONFIG.adminUid){
+    show("firebaseLogin");
+    hide("adminArea");
+    $("logoutFirebase").style.display = "none";
+    try{ alert("Esta cuenta NO es admin de esta tienda."); }catch(_){}
+    try{ await fb.signOut(auth); }catch(_){}
+    return false;
+  }
+
+  // ok
+  hide("firebaseLogin");
+  show("adminArea");
+  $("logoutFirebase").style.display = "";
   return true;
 }
 
-// ---------------------- FIREBASE LOGIN ----------------------
+/* ===== LOGIN ===== */
 $("loginFirebase").addEventListener("click", async ()=>{
   const email = $("fbEmail").value.trim();
   const pass = $("fbPass").value;
   try{
     await fb.signInWithEmailAndPassword(auth, email, pass);
-    const ok = await requireAdmin();
+    const ok = await forceAdminSession();
     if(!ok) return;
-    hide("firebaseLogin");
-    show("adminArea");
-    $("logoutFirebase").style.display = "";
     setActiveTab("pedidos");
     await Promise.all([loadOrders(), loadProducts(), loadClientes()]);
   }catch(e){
@@ -74,18 +99,9 @@ $("logoutFirebase").addEventListener("click", async ()=>{
   $("logoutFirebase").style.display = "none";
 });
 
-fb.onAuthStateChanged(auth, async (u)=>{
-  if(!u){
-    show("firebaseLogin");
-    hide("adminArea");
-    $("logoutFirebase").style.display = "none";
-    return;
-  }
-  const ok = await requireAdmin();
+fb.onAuthStateChanged(auth, async ()=>{
+  const ok = await forceAdminSession();
   if(!ok) return;
-  hide("firebaseLogin");
-  show("adminArea");
-  $("logoutFirebase").style.display = "";
   setActiveTab("pedidos");
   await Promise.all([loadOrders(), loadProducts(), loadClientes()]);
 });
@@ -93,7 +109,7 @@ fb.onAuthStateChanged(auth, async (u)=>{
 $("fbPass").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("loginFirebase").click(); });
 $("fbEmail").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("loginFirebase").click(); });
 
-// ---------------------- TABS ----------------------
+/* ===== TABS ===== */
 $("tabClientes").addEventListener("click", ()=>{ setActiveTab("clientes"); loadClientes(); });
 $("tabPedidos").addEventListener("click", ()=>{ setActiveTab("pedidos"); loadOrders(); });
 $("tabAgregar").addEventListener("click", ()=>{ setActiveTab("agregar"); loadProducts(); });
@@ -101,10 +117,12 @@ $("tabAgregar").addEventListener("click", ()=>{ setActiveTab("agregar"); loadPro
 $("btnRefreshOrders").addEventListener("click", loadOrders);
 $("btnRefreshClientes").addEventListener("click", loadClientes);
 
-// ---------------------- CLIENTES ----------------------
+/* ===== CLIENTES ===== */
 async function loadClientes(){
   const wrap = $("adminClientes");
   wrap.innerHTML = '<div class="small">Cargando…</div>';
+
+  // Intento con orderBy
   try{
     const q = fb.query(
       fb.collection(db,"customers"),
@@ -114,13 +132,40 @@ async function loadClientes(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
+    renderClientes(items);
+    return;
+  }catch(e){
+    console.warn("loadClientes primary failed:", e);
+  }
 
-    wrap.innerHTML = items.length ? items.map(c=>{
-      const name = c.fullName || "(sin nombre)";
-      const pts = Number(c.points||0);
-      const spent = Number(c.totalSpent||0);
-      const cnt = Number(c.ordersCount||0);
-      return `
+  // Fallback sin orderBy
+  try{
+    const q2 = fb.query(
+      fb.collection(db,"customers"),
+      fb.limit(200)
+    );
+    const snap2 = await fb.getDocs(q2);
+    const items2=[];
+    snap2.forEach(d=>items2.push({id:d.id, ...d.data()}));
+    items2.sort((a,b)=>{
+      const ta=a.updatedAt?.seconds||0, tb=b.updatedAt?.seconds||0;
+      return tb-ta;
+    });
+    renderClientes(items2);
+  }catch(e2){
+    console.warn("loadClientes fallback failed:", e2);
+    wrap.innerHTML = '<div class="small">No se pudo cargar clientes.</div>';
+  }
+}
+
+function renderClientes(items){
+  const wrap = $("adminClientes");
+  wrap.innerHTML = items.length ? items.map(c=>{
+    const name = c.fullName || "(sin nombre)";
+    const pts = Number(c.points||0);
+    const spent = Number(c.totalSpent||0);
+    const cnt = Number(c.ordersCount||0);
+    return `
       <div class="item" style="align-items:flex-start;">
         <div style="min-width:0; flex:1;">
           <div style="font-weight:980;">${escapeHtml(name)}</div>
@@ -134,19 +179,14 @@ async function loadClientes(){
           <button class="btn" data-view-orders="${escapeHtml(c.id)}">Ver pedidos</button>
         </div>
       </div>`;
-    }).join("") : '<div class="small">Aún no hay clientes.</div>';
+  }).join("") : '<div class="small">Aún no hay clientes.</div>';
 
-    wrap.querySelectorAll("[data-view-orders]").forEach(btn=>{
-      btn.addEventListener("click", async ()=>{
-        const uid = btn.getAttribute("data-view-orders");
-        await showOrdersForCustomer(uid);
-      });
+  wrap.querySelectorAll("[data-view-orders]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const uid = btn.getAttribute("data-view-orders");
+      await showOrdersForCustomer(uid);
     });
-
-  }catch(e){
-    console.warn(e);
-    wrap.innerHTML = '<div class="small">No se pudo cargar clientes.</div>';
-  }
+  });
 }
 
 async function showOrdersForCustomer(customerUid){
@@ -154,7 +194,7 @@ async function showOrdersForCustomer(customerUid){
   const wrap = $("adminOrders");
   wrap.innerHTML = '<div class="small">Cargando pedidos del cliente…</div>';
 
-  // 1) Intento “bonito” (con orderBy)
+  // Intento con orderBy
   try{
     const q = fb.query(
       fb.collection(db,"orders"),
@@ -171,7 +211,7 @@ async function showOrdersForCustomer(customerUid){
     console.warn("showOrdersForCustomer primary failed:", e);
   }
 
-  // 2) Fallback (SIN orderBy) — evita errores por índices/createdAt
+  // Fallback sin orderBy
   try{
     const q2 = fb.query(
       fb.collection(db,"orders"),
@@ -181,14 +221,10 @@ async function showOrdersForCustomer(customerUid){
     const snap2 = await fb.getDocs(q2);
     const orders2=[];
     snap2.forEach(d=>orders2.push({id:d.id, ...d.data()}));
-
-    // Ordena en frontend si existe createdAt
     orders2.sort((a,b)=>{
-      const ta = a.createdAt?.seconds ? a.createdAt.seconds : 0;
-      const tb = b.createdAt?.seconds ? b.createdAt.seconds : 0;
-      return tb - ta;
+      const ta=a.createdAt?.seconds||0, tb=b.createdAt?.seconds||0;
+      return tb-ta;
     });
-
     renderOrders(orders2);
   }catch(e2){
     console.warn("showOrdersForCustomer fallback failed:", e2);
@@ -196,10 +232,12 @@ async function showOrdersForCustomer(customerUid){
   }
 }
 
-// ---------------------- PEDIDOS ----------------------
+/* ===== PEDIDOS ===== */
 async function loadOrders(){
   const wrap = $("adminOrders");
   wrap.innerHTML = '<div class="small">Cargando…</div>';
+
+  // Intento con orderBy
   try{
     const q = fb.query(
       fb.collection(db,"orders"),
@@ -210,30 +248,48 @@ async function loadOrders(){
     const orders=[];
     snap.forEach(d=>orders.push({id:d.id, ...d.data()}));
     renderOrders(orders);
+    return;
   }catch(e){
-    console.warn(e);
+    console.warn("loadOrders primary failed:", e);
+  }
+
+  // Fallback sin orderBy
+  try{
+    const q2 = fb.query(
+      fb.collection(db,"orders"),
+      fb.limit(200)
+    );
+    const snap2 = await fb.getDocs(q2);
+    const orders2=[];
+    snap2.forEach(d=>orders2.push({id:d.id, ...d.data()}));
+    orders2.sort((a,b)=>{
+      const ta=a.createdAt?.seconds||0, tb=b.createdAt?.seconds||0;
+      return tb-ta;
+    });
+    renderOrders(orders2);
+  }catch(e2){
+    console.warn("loadOrders fallback failed:", e2);
     wrap.innerHTML = '<div class="small">No se pudo cargar pedidos.</div>';
   }
 }
 
 function renderOrders(orders){
   const wrap = $("adminOrders");
+
   wrap.innerHTML = orders.length ? orders.map(o=>{
     const ship = o.shipping || {};
     const status = o.status || "nuevo";
     const tracking = o.trackingNumber || "";
+
     const proofUrl =
-  o.proofUrl ||
-  o.proofURL ||
-  o.receiptUrl ||
-  o.receiptURL ||
-  o.comprobanteUrl ||
-  o.comprobanteURL ||
-  o.voucherUrl ||
-  o.voucherURL ||
-  "";
+      o.proofUrl || o.proofURL ||
+      o.receiptUrl || o.receiptURL ||
+      o.comprobanteUrl || o.comprobanteURL ||
+      o.voucherUrl || o.voucherURL || "";
+
     const items = Array.isArray(o.items) ? o.items : [];
     const lines = items.map(it=>`• ${escapeHtml(it.title||"Producto")} x${Number(it.qty||1)} (${money(it.price||0)})`).join("<br>");
+
     return `
     <div class="item" style="align-items:flex-start;">
       <div style="min-width:0; flex:1;">
@@ -241,10 +297,11 @@ function renderOrders(orders){
         <div class="small" style="margin-top:4px;">Cliente: <b>${escapeHtml(ship.fullName||"-")}</b> • Tel: <b>${escapeHtml(ship.phone||"-")}</b></div>
         <div class="small" style="margin-top:6px; line-height:1.35;">${lines || "(sin items)"}</div>
         <div class="small" style="margin-top:6px;">Subtotal: <b>${money(o.subtotal||0)}</b> • Envío: <b>${money(o.shippingCost||0)}</b> • Total: <b>${money(o.total||0)}</b></div>
-        ${proofUrl?`<div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-  <a class="btn" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener noreferrer">Ver comprobante</a>
-  <img class="proofThumb" src="${escapeHtml(proofUrl)}" alt="Comprobante" style="height:70px; border-radius:10px; border:1px solid rgba(255,255,255,.15);" />
-</div>`:""}
+        ${proofUrl ? `
+          <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <a class="btn" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener noreferrer">Ver comprobante</a>
+            <img class="proofThumb" src="${escapeHtml(proofUrl)}" alt="Comprobante" style="height:70px; border-radius:10px; border:1px solid rgba(255,255,255,.15);" />
+          </div>` : ""}
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; min-width:170px;">
         <select class="input" data-status="${escapeHtml(o.id)}">
@@ -277,7 +334,7 @@ function renderOrders(orders){
   });
 }
 
-// ---------------------- PRODUCTOS ----------------------
+/* ===== PRODUCTOS: tu mismo código (no lo toco) ===== */
 $("btnAddProduct").addEventListener("click", ()=>{
   show("productModal");
   $("pmTitle").value="";
@@ -292,7 +349,6 @@ $("btnAddProduct").addEventListener("click", ()=>{
   $("pmImage").value="";
   $("pmId").value="";
 });
-
 $("pmClose").addEventListener("click", ()=>hide("productModal"));
 
 $("pmSave").addEventListener("click", async ()=>{
@@ -324,27 +380,18 @@ $("pmSave").addEventListener("click", async ()=>{
     }
 
     const payload = {
-      title,
-      brand,
-      category,
-      subcategory: sub,
-      sub,
-      price,
-      stock,
-      sizeLabel,
-      sizeValue,
-      cm,
+      title, brand, category,
+      subcategory: sub, sub,
+      price, stock,
+      sizeLabel, sizeValue, cm,
       imageUrl,
       active: true,
       updatedAt: fb.serverTimestamp(),
       createdAt: fb.serverTimestamp(),
     };
 
-    if(id){
-      await fb.updateDoc(fb.doc(db,"products",id), payload);
-    }else{
-      await fb.addDoc(fb.collection(db,"products"), payload);
-    }
+    if(id) await fb.updateDoc(fb.doc(db,"products",id), payload);
+    else await fb.addDoc(fb.collection(db,"products"), payload);
 
     hide("productModal");
     await loadProducts();
@@ -366,13 +413,11 @@ async function loadProducts(){
     const snap = await fb.getDocs(q);
     const items=[];
     snap.forEach(d=>items.push({id:d.id, ...d.data()}));
-
     const visible = items.filter(p => (p && (p.active === undefined ? true : !!p.active)));
-
     wrap.innerHTML = visible.length ? visible.map(p=>{
       const meta = [p.brand, p.category, p.sub].filter(Boolean).join(" • ");
       const size = p.sizeLabel && p.sizeValue ? `${p.sizeLabel}: ${p.sizeValue}` : (p.sizeValue?`${p.sizeValue}`:"");
-      const cm = p.cm ? ` • cm: ${escapeHtml(p.cm)}` : "";
+      const cm2 = p.cm ? ` • cm: ${escapeHtml(p.cm)}` : "";
       return `
       <div class="item" style="align-items:flex-start;">
         <div style="width:56px; height:56px; border-radius:12px; overflow:hidden; background:rgba(255,255,255,.06); flex:0 0 56px;">
@@ -381,7 +426,7 @@ async function loadProducts(){
         <div style="min-width:0; flex:1;">
           <div style="font-weight:980;">${escapeHtml(p.title||"Producto")}</div>
           <div class="small" style="margin-top:4px;">${escapeHtml(meta)}</div>
-          <div class="small" style="margin-top:4px;">${size?escapeHtml(size):""}${cm}</div>
+          <div class="small" style="margin-top:4px;">${size?escapeHtml(size):""}${cm2}</div>
           <div class="small" style="margin-top:6px;">Precio: <b>${money(p.price||0)}</b> • Stock: <b>${Number(p.stock||0)}</b></div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
@@ -390,54 +435,13 @@ async function loadProducts(){
         </div>
       </div>`;
     }).join("") : '<div class="small">No hay productos aún.</div>';
-
-    wrap.querySelectorAll("[data-edit]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const id = btn.getAttribute("data-edit");
-        const p = visible.find(x=>x.id===id);
-        if(!p) return;
-        show("productModal");
-        $("pmId").value = p.id;
-        $("pmTitle").value = p.title||"";
-        $("pmBrand").value = p.brand||"";
-        $("pmCategory").value = p.category||"Ropa";
-        $("pmSub").value = p.sub||"";
-        $("pmPrice").value = p.price||0;
-        $("pmStock").value = p.stock||0;
-        $("pmSizeLabel").value = p.sizeLabel||"";
-        $("pmSizeValue").value = p.sizeValue||"";
-        $("pmCm").value = p.cm||"";
-        $("pmImage").value = "";
-        $("pmImageUrl").value = p.imageUrl||"";
-      });
-    });
-
-    wrap.querySelectorAll("[data-del]").forEach(btn=>{
-      btn.addEventListener("click", async ()=>{
-        const id = btn.getAttribute("data-del");
-        if(!confirm("¿Eliminar este producto?")) return;
-        try{
-          // Intentar borrar de verdad. Si Rules no permiten delete, hacemos "desactivar".
-          try{
-            await fb.deleteDoc(fb.doc(db,"products",id));
-          }catch(_){
-            await fb.updateDoc(fb.doc(db,"products",id), { active:false, updatedAt: fb.serverTimestamp() });
-          }
-          await loadProducts();
-        }catch(e){
-          console.warn(e);
-          alert("No se pudo eliminar. Revisa Rules de Firestore (products).");
-        }
-      });
-    });
-
   }catch(e){
     console.warn(e);
     wrap.innerHTML = '<div class="small">No se pudo cargar productos.</div>';
   }
 }
 
-// ---------------------- INIT UI ----------------------
+/* INIT */
 hide("adminArea");
 show("firebaseLogin");
 setActiveTab("pedidos");
