@@ -774,7 +774,7 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       reference: shipping?.reference || "",
     }) || {};
 
-    const orderPayload = sanitize({
+    const orderPayloadBase = sanitize({
       customerUid: u.uid,
       shipping: shippingSafe,
       items,
@@ -784,43 +784,51 @@ async function createOrderInFirestore({ shipping, cart, shippingCost, proofFile 
       total,
       payNow,
       paymentMode: CONFIG.paymentMode || "full",
-      status: proofFile ? "recibo_subido" : "nuevo",
+      // status se ajusta más abajo según exista comprobante real
+      status: "nuevo",
       trackingNumber: "",
       pointsEarned,
       createdAt: fb.serverTimestamp(),
       updatedAt: fb.serverTimestamp(),
     });
 
-    const orderRef = await fb.addDoc(fb.collection(db, "orders"), orderPayload);
+    // IMPORTANTE:
+    // - Subimos el comprobante primero (si existe)
+    // - Luego creamos el pedido YA con proofUrl (sin update posterior)
+    const orderRef = fb.doc(fb.collection(db, "orders"));
     const orderId = orderRef.id;
+
     let proofUrl = null;
+    let proofName = "";
+    let proofPath = "";
 
     if(proofFile){
       try{
         const safeName = (proofFile.name||"pago.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
-        const path = `orders/${u.uid}/${orderId}/${safeName}`;
-        const r = fb.ref(storage, path);
+        proofName = safeName;
+        proofPath = `orders/${u.uid}/${orderId}/${safeName}`;
+        const r = fb.ref(storage, proofPath);
         await fb.uploadBytes(r, proofFile);
         proofUrl = await fb.getDownloadURL(r);
-
-        await fb.updateDoc(fb.doc(db, "orders", orderId), sanitize({
-          proofUrl,
-          proofName: safeName,
-          status: "recibo_subido",
-          updatedAt: fb.serverTimestamp(),
-        }));
       }catch(e){
         console.warn("Proof upload failed:", e);
-        try{
-          await fb.updateDoc(fb.doc(db, "orders", orderId), sanitize({
-            status:"nuevo",
-            proofError:true,
-            updatedAt: fb.serverTimestamp()
-          }));
-        }catch(_){}
+        proofUrl = null;
+        proofName = "";
+        proofPath = "";
       }
     }
 
+    const orderPayload = sanitize({
+      ...orderPayloadBase,
+      proofUrl: proofUrl || "",
+      proofName: proofName || "",
+      proofPath: proofPath || "",
+      status: proofUrl ? "recibo_subido" : "nuevo",
+      updatedAt: fb.serverTimestamp(),
+      createdAt: fb.serverTimestamp(),
+    });
+
+    await fb.setDoc(orderRef, orderPayload);
     try{
       await fb.runTransaction(db, async (tx)=>{
         for(const it of items){

@@ -324,3 +324,19 @@ grid-template-columns:repeat(3, minmax(0,1fr));} }
 .bankBody small{opacity:.9}
 .bankBody .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .pill{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.10);font-size:12px}
+
+
+/* Admin (Pedidos) - evita overflow/zoom raro en móvil */
+@media (max-width: 520px){
+  #panelPedidos .item{
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  #panelPedidos .item > div{
+    min-width:0;
+  }
+  #panelPedidos .item > div:last-child{
+    width:100%;
+    min-width:0 !important;
+  }
+}
