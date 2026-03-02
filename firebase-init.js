@@ -1,4 +1,3 @@
-
 import { firebaseConfig, ADMIN_UID } from "./firebase-config.js";
 
 // Firebase SDK (sin npm, directo desde CDN)
@@ -20,42 +19,16 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-// Re-export helpers como "fb" para usar igual que ya lo tienes
 export const fb = {
-  // auth
-  onAuthStateChanged,
-  signInAnonymously,
-  signInWithEmailAndPassword,
-  signOut,
-
-  // firestore
   collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
   getDocs, query, where, orderBy, limit, serverTimestamp, Timestamp, onSnapshot, runTransaction,
-
-  // storage
-  ref, uploadBytes, getDownloadURL
+  ref, uploadBytes, getDownloadURL,
+  onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut
 };
 
 export async function ensureAnon(){
-  // Cliente (index.html): SIEMPRE anónimo, aunque antes hayas iniciado sesión como admin en este mismo navegador.
-  // Admin (admin.html): respeta el login con correo/clave.
-  const isAdminPage = location.pathname.endsWith("/admin.html") || location.pathname.endsWith("admin.html");
-  const u = auth.currentUser;
-
-  if(u){
-    if(u.isAnonymous) return u;
-
-    // Si NO es admin.html, forzamos anónimo para que “Mis pedidos” funcione
-    if(!isAdminPage){
-      try{ await signOut(auth); }catch(_){}
-      const cred = await signInAnonymously(auth);
-      return cred.user;
-    }
-
-    // En admin.html dejamos el usuario con correo/clave
-    return u;
-  }
-
+  // Identidad invisible (no le pides nada al cliente)
+  if(auth.currentUser) return auth.currentUser;
   const cred = await signInAnonymously(auth);
   return cred.user;
 }
