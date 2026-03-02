@@ -1,3 +1,4 @@
+
 import { CONFIG } from "./config.js";
 import { auth, db, storage, fb } from "./firebase-init.js";
 
@@ -24,6 +25,16 @@ function setActiveTab(tab){
   if(tab==="agregar") show("panelAgregar");
 }
 
+function openProofModal(url){
+  const img = $("proofFull");
+  if(img) img.src = url;
+  show("proofModal");
+}
+$("proofClose")?.addEventListener("click", ()=>hide("proofModal"));
+$("proofModal")?.addEventListener("click", (e)=>{
+  if(e.target && e.target.id==="proofModal") hide("proofModal");
+});
+
 function money(n){
   const v = Number(n||0);
   return `$${v.toFixed(2)}`;
@@ -33,7 +44,6 @@ function money(n){
 async function forceAdminSession(){
   const u = auth.currentUser;
 
-  // Si NO hay UID configurado, no sigas: sin esto nunca será “definitivo”.
   if(!CONFIG.adminUid){
     show("firebaseLogin");
     hide("adminArea");
@@ -42,7 +52,6 @@ async function forceAdminSession(){
     return false;
   }
 
-  // Si está como anónimo, afuera.
   if(u && u.isAnonymous){
     show("firebaseLogin");
     hide("adminArea");
@@ -51,7 +60,6 @@ async function forceAdminSession(){
     return false;
   }
 
-  // Si no hay user, mostrar login
   if(!u){
     show("firebaseLogin");
     hide("adminArea");
@@ -59,7 +67,6 @@ async function forceAdminSession(){
     return false;
   }
 
-  // UID debe coincidir
   if(u.uid !== CONFIG.adminUid){
     show("firebaseLogin");
     hide("adminArea");
@@ -69,7 +76,6 @@ async function forceAdminSession(){
     return false;
   }
 
-  // ok
   hide("firebaseLogin");
   show("adminArea");
   $("logoutFirebase").style.display = "";
@@ -84,8 +90,8 @@ $("loginFirebase").addEventListener("click", async ()=>{
     await fb.signInWithEmailAndPassword(auth, email, pass);
     const ok = await forceAdminSession();
     if(!ok) return;
-    setActiveTab("pedidos");
-    await Promise.all([loadOrders(), loadProducts(), loadClientes()]);
+    setActiveTab("clientes");
+    await Promise.all([loadProducts(), loadClientes()]);
   }catch(e){
     console.warn(e);
     alert("No se pudo iniciar sesión. Revisa correo/clave.");
@@ -102,8 +108,8 @@ $("logoutFirebase").addEventListener("click", async ()=>{
 fb.onAuthStateChanged(auth, async ()=>{
   const ok = await forceAdminSession();
   if(!ok) return;
-  setActiveTab("pedidos");
-  await Promise.all([loadOrders(), loadProducts(), loadClientes()]);
+  setActiveTab("clientes");
+  await Promise.all([loadProducts(), loadClientes()]);
 });
 
 $("fbPass").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("loginFirebase").click(); });
@@ -111,18 +117,19 @@ $("fbEmail").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("loginFire
 
 /* ===== TABS ===== */
 $("tabClientes").addEventListener("click", ()=>{ setActiveTab("clientes"); loadClientes(); });
-$("tabPedidos").addEventListener("click", ()=>{ setActiveTab("pedidos"); loadOrders(); });
 $("tabAgregar").addEventListener("click", ()=>{ setActiveTab("agregar"); loadProducts(); });
 
-$("btnRefreshOrders").addEventListener("click", loadOrders);
+$("btnRefreshOrders")?.addEventListener("click", loadOrders);
 $("btnRefreshClientes").addEventListener("click", loadClientes);
+
+// Volver desde pedidos del cliente
+$("btnBackToClientes")?.addEventListener("click", ()=>{ setActiveTab("clientes"); });
 
 /* ===== CLIENTES ===== */
 async function loadClientes(){
   const wrap = $("adminClientes");
   wrap.innerHTML = '<div class="small">Cargando…</div>';
 
-  // Intento con orderBy
   try{
     const q = fb.query(
       fb.collection(db,"customers"),
@@ -138,7 +145,6 @@ async function loadClientes(){
     console.warn("loadClientes primary failed:", e);
   }
 
-  // Fallback sin orderBy
   try{
     const q2 = fb.query(
       fb.collection(db,"customers"),
@@ -192,9 +198,16 @@ function renderClientes(items){
 async function showOrdersForCustomer(customerUid){
   setActiveTab("pedidos");
   const wrap = $("adminOrders");
+  const titleEl = $("ordersTitle");
+  if(titleEl) titleEl.textContent = "Pedidos del cliente";
+  const refreshBtn = $("btnRefreshOrders");
+  if(refreshBtn){
+    refreshBtn.style.display="";
+    refreshBtn.onclick = ()=>showOrdersForCustomer(customerUid);
+  }
+
   wrap.innerHTML = '<div class="small">Cargando pedidos del cliente…</div>';
 
-  // Intento con orderBy
   try{
     const q = fb.query(
       fb.collection(db,"orders"),
@@ -211,7 +224,6 @@ async function showOrdersForCustomer(customerUid){
     console.warn("showOrdersForCustomer primary failed:", e);
   }
 
-  // Fallback sin orderBy
   try{
     const q2 = fb.query(
       fb.collection(db,"orders"),
@@ -232,12 +244,11 @@ async function showOrdersForCustomer(customerUid){
   }
 }
 
-/* ===== PEDIDOS ===== */
+/* ===== PEDIDOS (se mantiene por si lo necesitas, pero ya no hay pestaña) ===== */
 async function loadOrders(){
   const wrap = $("adminOrders");
   wrap.innerHTML = '<div class="small">Cargando…</div>';
 
-  // Intento con orderBy
   try{
     const q = fb.query(
       fb.collection(db,"orders"),
@@ -253,7 +264,6 @@ async function loadOrders(){
     console.warn("loadOrders primary failed:", e);
   }
 
-  // Fallback sin orderBy
   try{
     const q2 = fb.query(
       fb.collection(db,"orders"),
@@ -297,12 +307,19 @@ function renderOrders(orders){
         <div class="small" style="margin-top:4px;">Cliente: <b>${escapeHtml(ship.fullName||"-")}</b> • Tel: <b>${escapeHtml(ship.phone||"-")}</b></div>
         <div class="small" style="margin-top:6px; line-height:1.35;">${lines || "(sin items)"}</div>
         <div class="small" style="margin-top:6px;">Subtotal: <b>${money(o.subtotal||0)}</b> • Envío: <b>${money(o.shippingCost||0)}</b> • Total: <b>${money(o.total||0)}</b></div>
+
         ${proofUrl ? `
-          <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <a class="btn" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener noreferrer">Ver comprobante</a>
-            <img class="proofThumb" src="${escapeHtml(proofUrl)}" alt="Comprobante" style="height:70px; border-radius:10px; border:1px solid rgba(255,255,255,.15);" />
+          <div style="margin-top:10px; display:grid; gap:10px;">
+            <div class="row" style="gap:10px; flex-wrap:wrap;">
+              <a class="btn" href="${escapeHtml(proofUrl)}" target="_blank" rel="noopener noreferrer">Abrir en nueva pestaña</a>
+              <button class="btn" data-proof="${escapeHtml(proofUrl)}">Ver aquí</button>
+            </div>
+            <div style="width:100%; max-width:520px; border-radius:14px; overflow:hidden; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06);">
+              <img class="proofThumb" data-proof="${escapeHtml(proofUrl)}" src="${escapeHtml(proofUrl)}" alt="Comprobante" style="width:100%; height:auto; display:block;" />
+            </div>
           </div>` : ""}
       </div>
+
       <div style="display:flex; flex-direction:column; gap:8px; min-width:170px;">
         <select class="input" data-status="${escapeHtml(o.id)}">
           ${["nuevo","recibo_subido","aprobado","enviado","entregado","cancelado"].map(s=>`<option value="${s}" ${s===status?"selected":""}>${s}</option>`).join("")}
@@ -330,6 +347,14 @@ function renderOrders(orders){
         console.warn(e);
         alert("No se pudo actualizar.");
       }
+    });
+  });
+
+  // Ver comprobante en modal (click en botón o imagen)
+  wrap.querySelectorAll("[data-proof]").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      const url = el.getAttribute("data-proof");
+      if(url) openProofModal(url);
     });
   });
 }
@@ -444,4 +469,4 @@ async function loadProducts(){
 /* INIT */
 hide("adminArea");
 show("firebaseLogin");
-setActiveTab("pedidos");
+setActiveTab("clientes");

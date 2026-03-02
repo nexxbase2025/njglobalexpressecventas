@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="es">
 <head>
@@ -23,7 +24,6 @@
     <section id="adminArea" style="display:none;">
       <div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:12px;">
         <button class="btn" id="tabClientes">Clientes</button>
-        <button class="btn" id="tabPedidos">Pedidos</button>
         <button class="btn aqua" id="tabAgregar">Agregar</button>
       </div>
 
@@ -36,9 +36,12 @@
       </section>
 
       <section class="panel" id="panelPedidos" style="display:none;">
-        <div class="row">
-          <div style="font-weight:980; font-size:16px;">Pedidos</div>
-          <button class="btn" id="btnRefreshOrders">Actualizar</button>
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <div style="font-weight:980; font-size:16px;" id="ordersTitle">Pedidos</div>
+          <div style="display:flex; gap:10px; margin-left:auto;">
+            <button class="btn" id="btnBackToClientes">← Clientes</button>
+            <button class="btn" id="btnRefreshOrders" style="display:none;">Actualizar</button>
+          </div>
         </div>
         <div id="adminOrders" class="cartlist" style="margin-top:10px;"></div>
       </section>
@@ -109,5 +112,19 @@
       </div>
     </div>
   </div>
+
+  <div class="modal" id="proofModal" style="display:none;">
+    <div class="panel" style="max-width:980px; width:min(980px, 96vw);">
+      <div class="row">
+        <div style="font-weight:980; font-size:16px;">Comprobante</div>
+        <button class="btn" id="proofClose">✕</button>
+      </div>
+      <div style="margin-top:10px;">
+        <img id="proofFull" alt="Comprobante" style="width:100%; max-height:80vh; object-fit:contain; border-radius:14px; background:rgba(255,255,255,.06);" />
+      </div>
+      <div class="small" style="margin-top:10px;">Tip: puedes hacer zoom con el gesto de pellizcar (móvil) o con el zoom del navegador.</div>
+    </div>
+  </div>
+
 </body>
 </html>
