@@ -462,7 +462,9 @@ function renderPay(enriched){
 $("shippingCost").addEventListener("input",()=>renderCart());
 
 function renderOrders(){
-  const orders=(Array.isArray(MY_ORDERS) && MY_ORDERS.length) ? MY_ORDERS : [];
+  // Fallback: si Firestore aún no carga (o falla el índice), usamos cache local.
+  const local = (()=>{ try{ return getOrders(); }catch(_){ return []; }})();
+  const orders=(Array.isArray(MY_ORDERS) && MY_ORDERS.length) ? MY_ORDERS : (Array.isArray(local)&&local.length?local:[]);
   const list=$("ordersList");
   list.innerHTML=orders.length?orders.slice(0,8).map(o=>`
     <div class="item" style="align-items:flex-start;">
@@ -589,6 +591,10 @@ $("btnPlaceOrder").addEventListener("click", async ()=>{
       totalFinal,
       proofUrl,
     };
+
+    // Guardar en cache local para que el cliente vea el estado aunque Firestore tarde
+    try{ saveOrder(order); }catch(_){ }
+    try{ renderOrders(); }catch(_){ }
 
     const e164=toWhatsAppE164(CONFIG.whatsapp || "0983706294");
     const waUrl = `https://wa.me/${e164}?text=${buildWhatsAppMessage(order)}`;
